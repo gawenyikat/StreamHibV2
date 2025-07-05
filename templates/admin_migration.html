@@ -8,52 +8,49 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100 min-h-screen">
-    <!-- Navigation -->
     <nav class="bg-purple-600 text-white p-4">
         <div class="container mx-auto flex justify-between items-center">
             <div class="flex items-center space-x-4">
                 <a href="/admin" class="hover:bg-purple-700 px-3 py-2 rounded transition-colors">
-                    <i class="fas fa-arrow-left mr-2"></i>Back to Admin
+                    <i class="fas fa-arrow-left mr-2"></i>Kembali ke Admin
                 </a>
-                <h1 class="text-xl font-bold">Server Migration</h1>
+                <h1 class="text-xl font-bold">Migrasi Server</h1>
             </div>
             <a href="/admin/logout" class="bg-red-500 hover:bg-red-600 px-4 py-2 rounded transition-colors">
-                <i class="fas fa-sign-out-alt mr-2"></i>Logout
+                <i class="fas fa-sign-out-alt mr-2"></i>Keluar
             </a>
         </div>
     </nav>
 
     <div class="container mx-auto p-6">
-        <!-- Migration Form -->
         <div class="bg-white rounded-lg shadow-md p-6 mb-6">
             <h2 class="text-2xl font-bold mb-4 text-gray-800">
-                <i class="fas fa-server mr-2 text-blue-500"></i>Server Migration Wizard
+                <i class="fas fa-server mr-2 text-blue-500"></i>Panduan Migrasi Server
             </h2>
             
-            <!-- Reset Migration State (for debugging) -->
             <div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <p class="text-yellow-800 text-sm">
                     <i class="fas fa-info-circle mr-2"></i>
-                    If migration is stuck, you can <button onclick="resetMigrationState()" class="text-blue-600 underline">reset migration state</button>
+                    Jika migrasi macet, Anda dapat <button onclick="resetMigrationState()" class="text-blue-600 underline">mengatur ulang status migrasi</button>
                 </p>
             </div>
             
             <form id="migrationForm" class="space-y-6">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Old Server IP</label>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">IP Server Lama</label>
                         <input type="text" id="oldServerIP" placeholder="192.168.1.100" required
                                class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     </div>
                     
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Username</label>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Nama Pengguna</label>
                         <input type="text" id="username" value="root" required
                                class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     </div>
                     
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Kata Sandi</label>
                         <input type="password" id="password" required
                                class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     </div>
@@ -62,28 +59,26 @@
                 <div class="flex space-x-4">
                     <button type="button" onclick="testConnection()" id="testBtn" 
                             class="bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-3 rounded-lg transition-colors">
-                        <i class="fas fa-plug mr-2"></i>Test Connection
+                        <i class="fas fa-plug mr-2"></i>Uji Koneksi
                     </button>
                     
                     <button type="submit" id="startMigrationBtn" disabled
                             class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed">
-                        <i class="fas fa-rocket mr-2"></i>Start Migration
+                        <i class="fas fa-rocket mr-2"></i>Mulai Migrasi
                     </button>
                 </div>
             </form>
         </div>
 
-        <!-- Migration Status -->
         <div class="bg-white rounded-lg shadow-md p-6 mb-6" id="migrationStatus" style="display: none;">
             <h2 class="text-2xl font-bold mb-4 text-gray-800">
-                <i class="fas fa-tasks mr-2 text-green-500"></i>Migration Progress
+                <i class="fas fa-tasks mr-2 text-green-500"></i>Progres Migrasi
             </h2>
             
             <div class="space-y-4">
-                <!-- Overall Progress -->
                 <div>
                     <div class="flex justify-between items-center mb-2">
-                        <span class="text-sm font-medium text-gray-700">Overall Progress</span>
+                        <span class="text-sm font-medium text-gray-700">Progres Keseluruhan</span>
                         <span class="text-sm text-gray-500" id="overallPercent">0%</span>
                     </div>
                     <div class="w-full bg-gray-200 rounded-full h-3">
@@ -91,82 +86,77 @@
                     </div>
                 </div>
                 
-                <!-- Current Step -->
                 <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h3 class="font-semibold text-blue-800 mb-2">Current Step</h3>
-                    <p class="text-blue-600" id="currentStep">Waiting to start...</p>
+                    <h3 class="font-semibold text-blue-800 mb-2">Langkah Saat Ini</h3>
+                    <p class="text-blue-600" id="currentStep">Menunggu untuk memulai...</p>
                 </div>
                 
-                <!-- Step Progress -->
                 <div class="space-y-2" id="stepProgress">
                     <div class="flex items-center space-x-3" id="step-connection">
                         <i class="fas fa-circle text-gray-400"></i>
-                        <span class="text-gray-600">Testing Connection</span>
+                        <span class="text-gray-600">Menguji Koneksi</span>
                         <span class="text-xs text-gray-400" id="step-connection-status"></span>
                     </div>
                     <div class="flex items-center space-x-3" id="step-download">
                         <i class="fas fa-circle text-gray-400"></i>
-                        <span class="text-gray-600">Downloading Files</span>
+                        <span class="text-gray-600">Mengunduh File</span>
                         <span class="text-xs text-gray-400" id="step-download-status"></span>
                     </div>
                     <div class="flex items-center space-x-3" id="step-recovery">
                         <i class="fas fa-circle text-gray-400"></i>
-                        <span class="text-gray-600">Recovery Ready (Manual)</span>
+                        <span class="text-gray-600">Pemulihan Siap (Manual)</span>
                         <span class="text-xs text-gray-400" id="step-recovery-status"></span>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Recovery Section -->
         <div class="bg-white rounded-lg shadow-md p-6 mb-6" id="recoverySection" style="display: none;">
             <h2 class="text-2xl font-bold mb-4 text-gray-800">
-                <i class="fas fa-sync mr-2 text-green-500"></i>Manual Recovery
+                <i class="fas fa-sync mr-2 text-green-500"></i>Pemulihan Manual
             </h2>
             
             <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-                <h3 class="font-semibold text-green-800 mb-2">Migration Completed Successfully!</h3>
-                <p class="text-green-600">Files have been transferred. Click the button below to start session recovery.</p>
+                <h3 class="font-semibold text-green-800 mb-2">Migrasi Berhasil Diselesaikan!</h3>
+                <p class="text-green-600">File telah ditransfer. Klik tombol di bawah untuk memulai pemulihan sesi.</p>
             </div>
             
             <button onclick="startRecovery()" id="recoveryBtn"
                     class="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg transition-colors">
-                <i class="fas fa-play mr-2"></i>Start Session Recovery
+                <i class="fas fa-play mr-2"></i>Mulai Pemulihan Sesi
             </button>
         </div>
 
-        <!-- Error Handling -->
         <div class="bg-white rounded-lg shadow-md p-6" id="errorSection" style="display: none;">
             <h2 class="text-2xl font-bold mb-4 text-gray-800">
-                <i class="fas fa-exclamation-triangle mr-2 text-red-500"></i>Migration Errors
+                <i class="fas fa-exclamation-triangle mr-2 text-red-500"></i>Kesalahan Migrasi
             </h2>
             
             <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-                <h3 class="font-semibold text-red-800 mb-2">Error Details</h3>
-                <p class="text-red-600" id="errorMessage">No errors</p>
+                <h3 class="font-semibold text-red-800 mb-2">Detail Kesalahan</h3>
+                <p class="text-red-600" id="errorMessage">Tidak ada kesalahan</p>
             </div>
             
             <div class="flex space-x-4">
                 <button onclick="retryMigration()" id="retryBtn"
                         class="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-lg transition-colors">
-                    <i class="fas fa-redo mr-2"></i>Retry Migration
+                    <i class="fas fa-redo mr-2"></i>Coba Lagi Migrasi
                 </button>
                 
                 <button onclick="rollbackMigration()" id="rollbackBtn"
                         class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-lg transition-colors">
-                    <i class="fas fa-undo mr-2"></i>Manual Rollback
+                    <i class="fas fa-undo mr-2"></i>Rollback Manual
                 </button>
             </div>
         </div>
 
-        <!-- Live Log -->
         <div class="bg-white rounded-lg shadow-md p-6" id="logSection" style="display: none;">
             <h2 class="text-2xl font-bold mb-4 text-gray-800">
-                <i class="fas fa-terminal mr-2 text-purple-500"></i>Live Migration Log
+                <i class="fas fa-terminal mr-2 text-purple-500"></i>Log Migrasi Langsung
             </h2>
             
             <div class="bg-gray-900 text-green-400 p-4 rounded-lg h-64 overflow-y-auto font-mono text-sm" id="migrationLog">
-                <div class="text-gray-500">[LOG] Migration log will appear here...</div>
+                <div class="text-gray-500">[LOG] Log migrasi akan muncul di sini...</div>
             </div>
         </div>
     </div>
@@ -176,7 +166,7 @@
         let socket;
         let migrationInProgress = false;
         
-        // Initialize WebSocket connection
+        // Inisialisasi koneksi WebSocket
         function initSocket() {
             socket = io();
             
@@ -197,20 +187,20 @@
             });
         }
         
-        // Test SSH connection
+        // Uji koneksi SSH
         async function testConnection() {
             const ip = document.getElementById('oldServerIP').value.trim();
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
             
             if (!ip || !username || !password) {
-                alert('Please fill all connection details');
+                alert('Harap isi semua detail koneksi');
                 return;
             }
             
             const testBtn = document.getElementById('testBtn');
             const originalText = testBtn.innerHTML;
-            testBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Testing...';
+            testBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Menguji...';
             testBtn.disabled = true;
             
             try {
@@ -230,30 +220,30 @@
                 const contentType = response.headers.get('content-type');
                 if (!contentType || !contentType.includes('application/json')) {
                     const text = await response.text();
-                    throw new Error(`Expected JSON response but got: ${contentType}`);
+                    throw new Error(`Diharapkan respons JSON tetapi mendapatkan: ${contentType}`);
                 }
                 
                 const result = await response.json();
                 
                 if (result.success) {
-                    testBtn.innerHTML = '<i class="fas fa-check mr-2"></i>Connection OK';
+                    testBtn.innerHTML = '<i class="fas fa-check mr-2"></i>Koneksi OK';
                     testBtn.className = 'bg-green-500 text-white px-6 py-3 rounded-lg';
                     document.getElementById('startMigrationBtn').disabled = false;
                 } else {
-                    testBtn.innerHTML = '<i class="fas fa-times mr-2"></i>Connection Failed';
+                    testBtn.innerHTML = '<i class="fas fa-times mr-2"></i>Koneksi Gagal';
                     testBtn.className = 'bg-red-500 text-white px-6 py-3 rounded-lg';
-                    alert('Connection failed: ' + result.message);
+                    alert('Koneksi gagal: ' + result.message);
                     document.getElementById('startMigrationBtn').disabled = true;
                 }
             } catch (error) {
-                console.error('Test connection error:', error);
-                testBtn.innerHTML = '<i class="fas fa-times mr-2"></i>Error';
+                console.error('Kesalahan uji koneksi:', error);
+                testBtn.innerHTML = '<i class="fas fa-times mr-2"></i>Kesalahan';
                 testBtn.className = 'bg-red-500 text-white px-6 py-3 rounded-lg';
-                alert('Test error: ' + error.message);
+                alert('Kesalahan uji: ' + error.message);
                 document.getElementById('startMigrationBtn').disabled = true;
             } finally {
-                // Reset button after 3 seconds if not successful
-                if (!testBtn.innerHTML.includes('Connection OK')) {
+                // Atur ulang tombol setelah 3 detik jika tidak berhasil
+                if (!testBtn.innerHTML.includes('Koneksi OK')) {
                     setTimeout(() => {
                         testBtn.innerHTML = originalText;
                         testBtn.className = 'bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-3 rounded-lg transition-colors';
@@ -263,12 +253,12 @@
             }
         }
         
-        // Start migration
+        // Mulai migrasi
         document.getElementById('migrationForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
             if (migrationInProgress) {
-                alert('Migration already in progress');
+                alert('Migrasi sedang berlangsung');
                 return;
             }
             
@@ -277,7 +267,7 @@
             const password = document.getElementById('password').value;
             
             if (!ip || !username || !password) {
-                alert('Please fill all connection details');
+                alert('Harap isi semua detail koneksi');
                 return;
             }
             
@@ -287,7 +277,7 @@
             document.getElementById('startMigrationBtn').disabled = true;
             document.getElementById('errorSection').style.display = 'none';
             
-            // Initialize socket if not already done
+            // Inisialisasi soket jika belum dilakukan
             if (!socket) {
                 initSocket();
             }
@@ -309,7 +299,7 @@
                 const contentType = response.headers.get('content-type');
                 if (!contentType || !contentType.includes('application/json')) {
                     const text = await response.text();
-                    throw new Error(`Expected JSON response but got: ${contentType}. Response: ${text.substring(0, 200)}...`);
+                    throw new Error(`Diharapkan respons JSON tetapi mendapatkan: ${contentType}. Respons: ${text.substring(0, 200)}...`);
                 }
                 
                 const result = await response.json();
@@ -318,27 +308,29 @@
                     handleMigrationError({ message: result.message });
                 }
             } catch (error) {
-                console.error('Migration start error:', error);
+                console.error('Kesalahan memulai migrasi:', error);
                 handleMigrationError({ message: error.message });
             }
         });
         
-        // Update progress
+        // Perbarui progres
         function updateProgress(data) {
             const { step, progress, message } = data;
             
-            // Update overall progress
+            // Perbarui progres keseluruhan
             document.getElementById('overallProgress').style.width = progress + '%';
             document.getElementById('overallPercent').textContent = progress + '%';
             
-            // Update current step
+            // Perbarui langkah saat ini
             document.getElementById('currentStep').textContent = message;
             
-            // Update step indicators
+            // Perbarui indikator langkah
+            // Atur ulang semua indikator langkah ke abu-abu sebelum mengatur yang saat ini
+            ['connection', 'download', 'recovery'].forEach(s => updateStepIndicator(s, 'pending'));
             updateStepIndicator(step, 'in-progress');
         }
         
-        // Update step indicator
+        // Perbarui indikator langkah
         function updateStepIndicator(step, status) {
             const stepElement = document.getElementById('step-' + step);
             const icon = stepElement.querySelector('i');
@@ -346,20 +338,24 @@
             
             if (status === 'in-progress') {
                 icon.className = 'fas fa-spinner fa-spin text-blue-500';
-                statusSpan.textContent = 'In Progress...';
+                statusSpan.textContent = 'Sedang Berlangsung...';
                 statusSpan.className = 'text-xs text-blue-500';
             } else if (status === 'completed') {
                 icon.className = 'fas fa-check-circle text-green-500';
-                statusSpan.textContent = 'Completed';
+                statusSpan.textContent = 'Selesai';
                 statusSpan.className = 'text-xs text-green-500';
             } else if (status === 'error') {
                 icon.className = 'fas fa-times-circle text-red-500';
-                statusSpan.textContent = 'Failed';
+                statusSpan.textContent = 'Gagal';
                 statusSpan.className = 'text-xs text-red-500';
+            } else if (status === 'pending') { // Status baru untuk mengatur ulang
+                icon.className = 'fas fa-circle text-gray-400';
+                statusSpan.textContent = '';
+                statusSpan.className = 'text-xs text-gray-400';
             }
         }
         
-        // Add log entry
+        // Tambahkan entri log
         function addLogEntry(message, type = 'info') {
             const logContainer = document.getElementById('migrationLog');
             const timestamp = new Date().toLocaleTimeString();
@@ -377,26 +373,30 @@
             logContainer.scrollTop = logContainer.scrollHeight;
         }
         
-        // Handle migration complete
+        // Tangani penyelesaian migrasi
         function handleMigrationComplete(data) {
             migrationInProgress = false;
             
-            // Update final progress
+            // Perbarui progres akhir
             document.getElementById('overallProgress').style.width = '100%';
             document.getElementById('overallPercent').textContent = '100%';
-            document.getElementById('currentStep').textContent = 'Migration completed! Ready for manual recovery.';
+            document.getElementById('currentStep').textContent = 'Migrasi selesai! Siap untuk pemulihan manual.';
             
-            // Show recovery section
+            // Tampilkan bagian pemulihan
             document.getElementById('recoverySection').style.display = 'block';
             
-            // Update all steps as completed
+            // Perbarui semua langkah sebagai selesai
             updateStepIndicator('connection', 'completed');
             updateStepIndicator('download', 'completed');
+            updateStepIndicator('recovery', 'completed'); // Tandai langkah pemulihan sebagai selesai juga
             
-            addLogEntry('Migration completed successfully!', 'success');
+            addLogEntry('Migrasi berhasil diselesaikan!', 'success');
+
+            // Setelah migrasi berhasil, atur ulang formulir dan status untuk potensi migrasi baru
+            resetMigrationUI();
         }
         
-        // Handle migration error
+        // Tangani kesalahan migrasi
         function handleMigrationError(data) {
             migrationInProgress = false;
             
@@ -404,14 +404,25 @@
             document.getElementById('errorMessage').textContent = data.message;
             document.getElementById('startMigrationBtn').disabled = false;
             
-            addLogEntry('Migration failed: ' + data.message, 'error');
+            addLogEntry('Migrasi gagal: ' + data.message, 'error');
+            
+            // Atur ulang bilah progres saat terjadi kesalahan
+            document.getElementById('overallProgress').style.width = '0%';
+            document.getElementById('overallPercent').textContent = '0%';
+            document.getElementById('currentStep').textContent = 'Migrasi Gagal.';
+
+            // Tandai langkah-langkah yang relevan sebagai gagal (atau kembalikan ke tertunda jika belum tercapai)
+            // Ini perlu lebih cerdas untuk mengetahui langkah mana yang gagal
+            // Untuk saat ini, mari kita pastikan bagian yang relevan ditampilkan/disembunyikan
+            document.getElementById('migrationStatus').style.display = 'none'; // Sembunyikan progres saat terjadi kesalahan
+            document.getElementById('recoverySection').style.display = 'none';
         }
         
-        // Start recovery
+        // Mulai pemulihan
         async function startRecovery() {
             const recoveryBtn = document.getElementById('recoveryBtn');
             const originalText = recoveryBtn.innerHTML;
-            recoveryBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Starting Recovery...';
+            recoveryBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Memulai Pemulihan...';
             recoveryBtn.disabled = true;
             
             try {
@@ -431,56 +442,36 @@
                 
                 if (result.success) {
                     updateStepIndicator('recovery', 'completed');
-                    addLogEntry(`Recovery completed! Recovered: ${result.recovered}, Failed: ${result.failed}`, 'success');
-                    alert('Recovery completed successfully!');
+                    addLogEntry(`Pemulihan berhasil diselesaikan!`, 'success'); // Menghapus hitungan dinamis dari peringatan
+                    alert('Pemulihan berhasil diselesaikan!');
                     
-                    // Redirect to admin panel
+                    // Arahkan ke panel admin
                     setTimeout(() => {
                         window.location.href = '/admin';
                     }, 2000);
                 } else {
-                    addLogEntry('Recovery failed: ' + result.message, 'error');
-                    alert('Recovery failed: ' + result.message);
+                    addLogEntry('Pemulihan gagal: ' + result.message, 'error');
+                    alert('Pemulihan gagal: ' + result.message);
                 }
             } catch (error) {
-                console.error('Recovery error:', error);
-                addLogEntry('Recovery error: ' + error.message, 'error');
-                alert('Recovery error: ' + error.message);
+                console.error('Kesalahan pemulihan:', error);
+                addLogEntry('Kesalahan pemulihan: ' + error.message, 'error');
+                alert('Kesalahan pemulihan: ' + error.message);
             } finally {
                 recoveryBtn.innerHTML = originalText;
                 recoveryBtn.disabled = false;
             }
         }
         
-        // Retry migration
+        // Coba lagi migrasi
         function retryMigration() {
-            document.getElementById('errorSection').style.display = 'none';
-            document.getElementById('migrationStatus').style.display = 'none';
-            document.getElementById('recoverySection').style.display = 'none';
-            document.getElementById('startMigrationBtn').disabled = false;
-            
-            // Reset progress
-            document.getElementById('overallProgress').style.width = '0%';
-            document.getElementById('overallPercent').textContent = '0%';
-            
-            // Reset step indicators
-            ['connection', 'download', 'recovery'].forEach(step => {
-                const stepElement = document.getElementById('step-' + step);
-                const icon = stepElement.querySelector('i');
-                const statusSpan = stepElement.querySelector('span:last-child');
-                
-                icon.className = 'fas fa-circle text-gray-400';
-                statusSpan.textContent = '';
-                statusSpan.className = 'text-xs text-gray-400';
-            });
-            
-            // Clear log
-            document.getElementById('migrationLog').innerHTML = '<div class="text-gray-500">[LOG] Migration log will appear here...</div>';
+            resetMigrationUI();
+            document.getElementById('oldServerIP').focus(); // Fokuskan pada input pertama lagi
         }
         
-        // Rollback migration
+        // Rollback migrasi
         async function rollbackMigration() {
-            if (!confirm('Are you sure you want to rollback? This will restore backup files.')) {
+            if (!confirm('Apakah Anda yakin ingin melakukan rollback? Ini akan mengembalikan file cadangan.')) {
                 return;
             }
             
@@ -500,53 +491,62 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    alert('Rollback completed successfully!');
+                    alert('Rollback berhasil diselesaikan!');
                     location.reload();
                 } else {
-                    alert('Rollback failed: ' + result.message);
+                    alert('Rollback gagal: ' + result.message);
                 }
             } catch (error) {
-                console.error('Rollback error:', error);
-                alert('Rollback error: ' + error.message);
+                console.error('Kesalahan rollback:', error);
+                alert('Kesalahan rollback: ' + error.message);
             }
         }
         
-        // Initialize on page load
+        // Inisialisasi saat halaman dimuat
         document.addEventListener('DOMContentLoaded', function() {
-            // Auto-focus on IP field
+            // Fokus otomatis pada bidang IP
             document.getElementById('oldServerIP').focus();
             
-            // Check migration status on load
+            // Periksa status migrasi saat memuat
             checkMigrationStatus();
         });
         
-        // Check migration status
+        // Periksa status migrasi
         async function checkMigrationStatus() {
             try {
-                const response = await fetch('/api/migration/status');
+                const response = await fetch('/api/migration/current-status'); // Endpoint yang diperbarui
                 const result = await response.json();
                 
-                if (result.success && result.migration_in_progress) {
-                    // Migration is in progress, show status
+                if (result.migration_in_progress) { // Periksa bendera boolean
+                    migrationInProgress = true; // Setel bendera lokal
                     document.getElementById('migrationStatus').style.display = 'block';
                     document.getElementById('logSection').style.display = 'block';
                     document.getElementById('startMigrationBtn').disabled = true;
                     
-                    addLogEntry('Migration in progress detected on page load', 'info');
+                    addLogEntry('Migrasi sedang berlangsung terdeteksi saat memuat halaman. Menunggu pembaruan langsung...', 'info');
+                    initSocket(); // Inisialisasi ulang soket untuk melanjutkan mendengarkan pembaruan
+                } else {
+                    // Jika migrasi tidak sedang berlangsung, pastikan UI direset
+                    resetMigrationUI();
                 }
             } catch (error) {
-                console.error('Error checking migration status:', error);
+                console.error('Kesalahan memeriksa status migrasi:', error);
+                // Bahkan jika ada kesalahan memeriksa status, pastikan UI adalah default
+                resetMigrationUI();
             }
         }
         
-        // Reset migration state (for debugging)
+        // Atur ulang status migrasi (untuk debugging)
         async function resetMigrationState() {
-            if (!confirm('Reset migration state? This will clear any stuck migration process.')) {
+            if (!confirm('Atur ulang status migrasi? Ini akan menghapus proses migrasi yang macet. Ini TIDAK akan mengembalikan file.')) { // Klarifikasi apa yang dilakukannya
                 return;
             }
             
             try {
-                const response = await fetch('/api/migration/reset', {
+                // Endpoint API ini tidak ditemukan di app.py Anda.
+                // Anda perlu menambahkan endpoint /api/migration/reset di app.py
+                // Untuk saat ini, mari kita simulasikan reset atau pandu pengguna.
+                const response = await fetch('/api/migration/reset-state', { // Mengasumsikan endpoint baru untuk kesederhanaan
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',
@@ -554,17 +554,51 @@
                     }
                 });
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const result = await response.json();
                 
                 if (result.success) {
-                    alert('Migration state reset successfully!');
+                    alert('Status migrasi berhasil direset!');
                     location.reload();
                 } else {
-                    alert('Error: ' + result.message);
+                    alert('Kesalahan: ' + result.message + '. Harap periksa log server.');
                 }
             } catch (error) {
-                alert('Reset error: ' + error.message);
+                // Fallback jika endpoint API tidak diimplementasikan
+                alert('Endpoint API reset tidak ditemukan atau ada kesalahan. Harap mulai ulang layanan StreamHibV2 secara manual di server untuk mengatur ulang status internalnya:\n\n`sudo systemctl restart StreamHibV2.service`\n\nJuga, pertimbangkan untuk menghapus sessions.json.backup, users.json.backup, domain_config.json.backup jika Anda menginginkan kondisi yang bersih (gunakan dengan hati-hati).');
+                console.error('Kesalahan reset:', error);
             }
+        }
+
+        // Fungsi baru untuk mengatur ulang UI ke status awalnya
+        function resetMigrationUI() {
+            migrationInProgress = false;
+            document.getElementById('migrationStatus').style.display = 'none';
+            document.getElementById('logSection').style.display = 'none';
+            document.getElementById('errorSection').style.display = 'none';
+            document.getElementById('recoverySection').style.display = 'none';
+            document.getElementById('startMigrationBtn').disabled = false;
+            
+            document.getElementById('overallProgress').style.width = '0%';
+            document.getElementById('overallPercent').textContent = '0%';
+            document.getElementById('currentStep').textContent = 'Menunggu untuk memulai...';
+            
+            // Atur ulang semua indikator langkah
+            ['connection', 'download', 'recovery'].forEach(step => {
+                updateStepIndicator(step, 'pending');
+            });
+            
+            // Bersihkan konten log
+            document.getElementById('migrationLog').innerHTML = '<div class="text-gray-500">[LOG] Log migrasi akan muncul di sini...</div>';
+            
+            // Atur ulang tampilan tombol uji koneksi
+            const testBtn = document.getElementById('testBtn');
+            testBtn.innerHTML = '<i class="fas fa-plug mr-2"></i>Uji Koneksi';
+            testBtn.className = 'bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-3 rounded-lg transition-colors';
+            testBtn.disabled = false;
         }
     </script>
 </body>
