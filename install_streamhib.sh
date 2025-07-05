@@ -82,7 +82,7 @@ if [ -d "StreamHibV2" ]; then
     rm -rf StreamHibV2
 fi
 
-git clone https://github.com/emuhib/StreamHibV2.git
+git clone https://github.com/gawenyikat/StreamHibV2.git
 check_command "Clone repository"
 
 cd StreamHibV2
