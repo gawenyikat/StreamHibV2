@@ -8,6 +8,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100 min-h-screen">
+    <!-- Navigasi -->
     <nav class="bg-purple-600 text-white p-4">
         <div class="container mx-auto flex justify-between items-center">
             <div class="flex items-center space-x-4">
@@ -23,6 +24,7 @@
     </nav>
 
     <div class="container mx-auto p-6">
+        <!-- Formulir Migrasi -->
         <div class="bg-white rounded-lg shadow-md p-6 mb-6">
             <h2 class="text-2xl font-bold mb-4 text-gray-800">
                 <i class="fas fa-server mr-2 text-blue-500"></i>Panduan Migrasi Server
@@ -62,7 +64,7 @@
                         <i class="fas fa-plug mr-2"></i>Uji Koneksi
                     </button>
                     
-                    <button type="submit" id="startMigrationBtn" disabled
+                    <button type="button" id="startMigrationBtn" disabled
                             class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed">
                         <i class="fas fa-rocket mr-2"></i>Mulai Migrasi
                     </button>
@@ -163,38 +165,88 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
+        // Log ini akan muncul di konsol jika skrip berhasil dimulai
+        console.log("admin_migration.html: Skrip JavaScript mulai dieksekusi.");
+
         let socket;
         let migrationInProgress = false;
         
         // Inisialisasi koneksi WebSocket
+        // Panggil initSocket() secara langsung setelah variabel dideklarasikan
+        // untuk memastikan koneksi diatur saat halaman dimuat.
+        initSocket();
+
         function initSocket() {
-            socket = io();
+            console.log("initSocket(): Memulai inisialisasi Socket.IO.");
+            // Pastikan hanya satu instance socket yang aktif
+            if (socket && socket.connected) {
+                console.log('initSocket(): Socket.IO sudah terhubung atau sedang dalam proses koneksi.');
+                return;
+            }
+            if (socket) { // Jika ada instance yang terputus, coba sambungkan ulang
+                socket.connect();
+                console.log('initSocket(): Mencoba menyambungkan kembali Socket.IO...');
+                return;
+            }
+
+            console.log('initSocket(): Menginisialisasi Socket.IO baru...');
+            socket = io(); // default connect to current origin
+
+            socket.on('connect', () => {
+                console.log('Socket.IO Event: connect - Terhubung!');
+                addLogEntry('Terhubung ke server StreamHib via Socket.IO!', 'success');
+            });
+
+            socket.on('disconnect', (reason) => {
+                console.log('Socket.IO Event: disconnect - Terputus!', reason);
+                addLogEntry(`Koneksi Socket.IO terputus: ${reason}`, 'warning');
+                if (reason === 'io server disconnect') {
+                    alert('Sesi admin mungkin telah berakhir atau server memutuskan koneksi. Harap login kembali.');
+                    window.location.href = '/admin/login';
+                }
+                setTimeout(() => {
+                    if (!socket.connected) {
+                        socket.connect();
+                    }
+                }, 3000);
+            });
+
+            socket.on('connect_error', (err) => {
+                console.error('Socket.IO Event: connect_error - Kesalahan koneksi:', err);
+                addLogEntry(`Kesalahan koneksi Socket.IO: ${err.message}`, 'error');
+            });
             
             socket.on('migration_progress', function(data) {
+                console.log('Socket.IO Event: migration_progress', data);
                 updateProgress(data);
             });
             
             socket.on('migration_log', function(data) {
+                console.log('Socket.IO Event: migration_log', data);
                 addLogEntry(data.message, data.type);
             });
             
             socket.on('migration_complete', function(data) {
+                console.log('Socket.IO Event: migration_complete', data);
                 handleMigrationComplete(data);
             });
             
             socket.on('migration_error', function(data) {
+                console.log('Socket.IO Event: migration_error', data);
                 handleMigrationError(data);
             });
         }
         
         // Uji koneksi SSH
         async function testConnection() {
+            console.log("testConnection(): Memulai uji koneksi.");
             const ip = document.getElementById('oldServerIP').value.trim();
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
             
             if (!ip || !username || !password) {
                 alert('Harap isi semua detail koneksi');
+                console.warn("testConnection(): Detail koneksi tidak lengkap.");
                 return;
             }
             
@@ -214,35 +266,40 @@
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const errorText = await response.text();
+                    console.error("testConnection(): Respon API tidak OK.", response.status, errorText);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}. Detail: ${errorText}`);
                 }
                 
                 const contentType = response.headers.get('content-type');
                 if (!contentType || !contentType.includes('application/json')) {
                     const text = await response.text();
-                    throw new Error(`Diharapkan respons JSON tetapi mendapatkan: ${contentType}`);
+                    console.error("testConnection(): Respon bukan JSON.", contentType, text);
+                    throw new Error(`Diharapkan respons JSON tetapi mendapatkan: ${contentType}. Respons: ${text.substring(0, 200)}...`);
                 }
                 
                 const result = await response.json();
+                console.log("testConnection(): Hasil API:", result);
                 
                 if (result.success) {
                     testBtn.innerHTML = '<i class="fas fa-check mr-2"></i>Koneksi OK';
                     testBtn.className = 'bg-green-500 text-white px-6 py-3 rounded-lg';
                     document.getElementById('startMigrationBtn').disabled = false;
+                    console.log("testConnection(): Koneksi berhasil, tombol 'Mulai Migrasi' diaktifkan.");
                 } else {
                     testBtn.innerHTML = '<i class="fas fa-times mr-2"></i>Koneksi Gagal';
                     testBtn.className = 'bg-red-500 text-white px-6 py-3 rounded-lg';
                     alert('Koneksi gagal: ' + result.message);
                     document.getElementById('startMigrationBtn').disabled = true;
+                    console.warn("testConnection(): Koneksi gagal:", result.message);
                 }
             } catch (error) {
-                console.error('Kesalahan uji koneksi:', error);
+                console.error('testConnection(): Kesalahan uji koneksi:', error);
                 testBtn.innerHTML = '<i class="fas fa-times mr-2"></i>Kesalahan';
                 testBtn.className = 'bg-red-500 text-white px-6 py-3 rounded-lg';
                 alert('Kesalahan uji: ' + error.message);
                 document.getElementById('startMigrationBtn').disabled = true;
             } finally {
-                // Atur ulang tombol setelah 3 detik jika tidak berhasil
                 if (!testBtn.innerHTML.includes('Koneksi OK')) {
                     setTimeout(() => {
                         testBtn.innerHTML = originalText;
@@ -253,12 +310,14 @@
             }
         }
         
-        // Mulai migrasi
-        document.getElementById('migrationForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
+        // Mulai migrasi - Event listener diubah ke tombol 'click' langsung
+        document.getElementById('startMigrationBtn').addEventListener('click', async (e) => {
+            e.preventDefault(); // Penting untuk tombol type="button" agar tidak memicu submit form jika ada
+            console.log("startMigrationBtn: Tombol 'Mulai Migrasi' diklik! Memulai proses migrasi.");
             
             if (migrationInProgress) {
                 alert('Migrasi sedang berlangsung');
+                console.warn("startMigrationBtn: Migrasi sudah berlangsung.");
                 return;
             }
             
@@ -268,21 +327,28 @@
             
             if (!ip || !username || !password) {
                 alert('Harap isi semua detail koneksi');
+                console.warn("startMigrationBtn: Detail koneksi tidak lengkap.");
                 return;
             }
             
-            migrationInProgress = true;
+            // Tampilkan UI progres migrasi
             document.getElementById('migrationStatus').style.display = 'block';
             document.getElementById('logSection').style.display = 'block';
             document.getElementById('startMigrationBtn').disabled = true;
             document.getElementById('errorSection').style.display = 'none';
+            document.getElementById('recoverySection').style.display = 'none';
             
-            // Inisialisasi soket jika belum dilakukan
-            if (!socket) {
-                initSocket();
-            }
+            // Atur ulang progres dan status langkah
+            document.getElementById('overallProgress').style.width = '0%';
+            document.getElementById('overallPercent').textContent = '0%';
+            document.getElementById('currentStep').textContent = 'Memulai migrasi...';
+            ['connection', 'download', 'recovery'].forEach(s => updateStepIndicator(s, 'pending'));
+            document.getElementById('migrationLog').innerHTML = '<div class="text-gray-500">[LOG] Log migrasi akan muncul di sini...</div>';
+
+            migrationInProgress = true; 
             
             try {
+                console.log("startMigrationBtn: Mengirim permintaan API /api/migration/start...");
                 const response = await fetch('/api/migration/start', {
                     method: 'POST',
                     headers: { 
@@ -293,39 +359,44 @@
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const errorText = await response.text();
+                    console.error("startMigrationBtn: Respon API /api/migration/start tidak OK.", response.status, errorText);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}. Detail: ${errorText}`);
                 }
                 
                 const contentType = response.headers.get('content-type');
                 if (!contentType || !contentType.includes('application/json')) {
                     const text = await response.text();
+                    console.error("startMigrationBtn: Respon API /api/migration/start bukan JSON.", contentType, text);
                     throw new Error(`Diharapkan respons JSON tetapi mendapatkan: ${contentType}. Respons: ${text.substring(0, 200)}...`);
                 }
                 
                 const result = await response.json();
+                console.log("startMigrationBtn: Hasil API /api/migration/start:", result);
                 
                 if (!result.success) {
                     handleMigrationError({ message: result.message });
                 }
+                // Jika sukses, backend akan memancarkan event Socket.IO.
+                // Tidak perlu ada kode tambahan di sini untuk update UI progres,
+                // karena itu akan ditangani oleh listener Socket.IO.
             } catch (error) {
-                console.error('Kesalahan memulai migrasi:', error);
+                console.error('startMigrationBtn: Kesalahan saat memanggil API /api/migration/start:', error);
                 handleMigrationError({ message: error.message });
             }
         });
         
         // Perbarui progres
         function updateProgress(data) {
+            console.log("updateProgress(): Menerima data progres:", data);
             const { step, progress, message } = data;
             
-            // Perbarui progres keseluruhan
             document.getElementById('overallProgress').style.width = progress + '%';
             document.getElementById('overallPercent').textContent = progress + '%';
             
-            // Perbarui langkah saat ini
             document.getElementById('currentStep').textContent = message;
             
-            // Perbarui indikator langkah
-            // Atur ulang semua indikator langkah ke abu-abu sebelum mengatur yang saat ini
+            // Setel semua indikator langkah ke pending terlebih dahulu, lalu setel yang aktif
             ['connection', 'download', 'recovery'].forEach(s => updateStepIndicator(s, 'pending'));
             updateStepIndicator(step, 'in-progress');
         }
@@ -333,6 +404,10 @@
         // Perbarui indikator langkah
         function updateStepIndicator(step, status) {
             const stepElement = document.getElementById('step-' + step);
+            if (!stepElement) {
+                console.warn(`updateStepIndicator(): Elemen langkah '${step}' tidak ditemukan.`);
+                return;
+            }
             const icon = stepElement.querySelector('i');
             const statusSpan = stepElement.querySelector('span:last-child');
             
@@ -348,7 +423,7 @@
                 icon.className = 'fas fa-times-circle text-red-500';
                 statusSpan.textContent = 'Gagal';
                 statusSpan.className = 'text-xs text-red-500';
-            } else if (status === 'pending') { // Status baru untuk mengatur ulang
+            } else if (status === 'pending') {
                 icon.className = 'fas fa-circle text-gray-400';
                 statusSpan.textContent = '';
                 statusSpan.className = 'text-xs text-gray-400';
@@ -375,29 +450,27 @@
         
         // Tangani penyelesaian migrasi
         function handleMigrationComplete(data) {
+            console.log("handleMigrationComplete(): Migrasi selesai!", data);
             migrationInProgress = false;
             
-            // Perbarui progres akhir
             document.getElementById('overallProgress').style.width = '100%';
             document.getElementById('overallPercent').textContent = '100%';
             document.getElementById('currentStep').textContent = 'Migrasi selesai! Siap untuk pemulihan manual.';
             
-            // Tampilkan bagian pemulihan
             document.getElementById('recoverySection').style.display = 'block';
             
-            // Perbarui semua langkah sebagai selesai
             updateStepIndicator('connection', 'completed');
             updateStepIndicator('download', 'completed');
-            updateStepIndicator('recovery', 'completed'); // Tandai langkah pemulihan sebagai selesai juga
+            updateStepIndicator('recovery', 'completed');
             
             addLogEntry('Migrasi berhasil diselesaikan!', 'success');
 
-            // Setelah migrasi berhasil, atur ulang formulir dan status untuk potensi migrasi baru
-            resetMigrationUI();
+            // Tidak perlu reset UI sepenuhnya, biarkan recoverySection terlihat.
         }
         
         // Tangani kesalahan migrasi
         function handleMigrationError(data) {
+            console.error("handleMigrationError(): Migrasi gagal!", data);
             migrationInProgress = false;
             
             document.getElementById('errorSection').style.display = 'block';
@@ -406,20 +479,17 @@
             
             addLogEntry('Migrasi gagal: ' + data.message, 'error');
             
-            // Atur ulang bilah progres saat terjadi kesalahan
             document.getElementById('overallProgress').style.width = '0%';
             document.getElementById('overallPercent').textContent = '0%';
             document.getElementById('currentStep').textContent = 'Migrasi Gagal.';
 
-            // Tandai langkah-langkah yang relevan sebagai gagal (atau kembalikan ke tertunda jika belum tercapai)
-            // Ini perlu lebih cerdas untuk mengetahui langkah mana yang gagal
-            // Untuk saat ini, mari kita pastikan bagian yang relevan ditampilkan/disembunyikan
-            document.getElementById('migrationStatus').style.display = 'none'; // Sembunyikan progres saat terjadi kesalahan
+            document.getElementById('migrationStatus').style.display = 'none'; 
             document.getElementById('recoverySection').style.display = 'none';
         }
         
         // Mulai pemulihan
         async function startRecovery() {
+            console.log("startRecovery(): Memulai pemulihan sesi.");
             const recoveryBtn = document.getElementById('recoveryBtn');
             const originalText = recoveryBtn.innerHTML;
             recoveryBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Memulai Pemulihan...';
@@ -431,21 +501,24 @@
                     headers: { 
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
-                    }
+                    },
+                    body: JSON.stringify({})
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const errorText = await response.text();
+                    console.error("startRecovery(): Respon API recovery tidak OK.", response.status, errorText);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}. Detail: ${errorText}`);
                 }
                 
                 const result = await response.json();
+                console.log("startRecovery(): Hasil API recovery:", result);
                 
                 if (result.success) {
                     updateStepIndicator('recovery', 'completed');
-                    addLogEntry(`Pemulihan berhasil diselesaikan!`, 'success'); // Menghapus hitungan dinamis dari peringatan
+                    addLogEntry(`Pemulihan berhasil diselesaikan!`, 'success');
                     alert('Pemulihan berhasil diselesaikan!');
                     
-                    // Arahkan ke panel admin
                     setTimeout(() => {
                         window.location.href = '/admin';
                     }, 2000);
@@ -454,7 +527,7 @@
                     alert('Pemulihan gagal: ' + result.message);
                 }
             } catch (error) {
-                console.error('Kesalahan pemulihan:', error);
+                console.error('startRecovery(): Kesalahan pemulihan:', error);
                 addLogEntry('Kesalahan pemulihan: ' + error.message, 'error');
                 alert('Kesalahan pemulihan: ' + error.message);
             } finally {
@@ -465,12 +538,14 @@
         
         // Coba lagi migrasi
         function retryMigration() {
+            console.log("retryMigration(): Mengatur ulang UI untuk mencoba lagi migrasi.");
             resetMigrationUI();
-            document.getElementById('oldServerIP').focus(); // Fokuskan pada input pertama lagi
+            document.getElementById('oldServerIP').focus();
         }
         
         // Rollback migrasi
         async function rollbackMigration() {
+            console.log("rollbackMigration(): Memulai proses rollback.");
             if (!confirm('Apakah Anda yakin ingin melakukan rollback? Ini akan mengembalikan file cadangan.')) {
                 return;
             }
@@ -481,14 +556,18 @@
                     headers: { 
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
-                    }
+                    },
+                    body: JSON.stringify({})
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const errorText = await response.text();
+                    console.error("rollbackMigration(): Respon API rollback tidak OK.", response.status, errorText);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}. Detail: ${errorText}`);
                 }
                 
                 const result = await response.json();
+                console.log("rollbackMigration(): Hasil API rollback:", result);
                 
                 if (result.success) {
                     alert('Rollback berhasil diselesaikan!');
@@ -497,68 +576,74 @@
                     alert('Rollback gagal: ' + result.message);
                 }
             } catch (error) {
-                console.error('Kesalahan rollback:', error);
+                console.error('rollbackMigration(): Kesalahan rollback:', error);
                 alert('Kesalahan rollback: ' + error.message);
             }
         }
         
         // Inisialisasi saat halaman dimuat
         document.addEventListener('DOMContentLoaded', function() {
-            // Fokus otomatis pada bidang IP
+            console.log("DOMContentLoaded: Halaman dimuat, memulai inisialisasi.");
             document.getElementById('oldServerIP').focus();
-            
-            // Periksa status migrasi saat memuat
             checkMigrationStatus();
         });
         
         // Periksa status migrasi
         async function checkMigrationStatus() {
+            console.log("checkMigrationStatus(): Memeriksa status migrasi saat ini.");
             try {
-                const response = await fetch('/api/migration/current-status'); // Endpoint yang diperbarui
+                const response = await fetch('/api/migration/current-status');
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error("checkMigrationStatus(): Respon API current-status tidak OK.", response.status, errorText);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}. Detail: ${errorText}`);
+                }
                 const result = await response.json();
+                console.log("checkMigrationStatus(): Hasil API current-status:", result);
                 
-                if (result.migration_in_progress) { // Periksa bendera boolean
-                    migrationInProgress = true; // Setel bendera lokal
+                if (result.migration_in_progress) {
+                    migrationInProgress = true;
                     document.getElementById('migrationStatus').style.display = 'block';
                     document.getElementById('logSection').style.display = 'block';
                     document.getElementById('startMigrationBtn').disabled = true;
                     
                     addLogEntry('Migrasi sedang berlangsung terdeteksi saat memuat halaman. Menunggu pembaruan langsung...', 'info');
-                    initSocket(); // Inisialisasi ulang soket untuk melanjutkan mendengarkan pembaruan
+                    // initSocket() sudah dipanggil di awal, tidak perlu memanggilnya lagi di sini
                 } else {
-                    // Jika migrasi tidak sedang berlangsung, pastikan UI direset
                     resetMigrationUI();
+                    console.log("checkMigrationStatus(): Migrasi tidak berlangsung, UI direset.");
                 }
             } catch (error) {
-                console.error('Kesalahan memeriksa status migrasi:', error);
-                // Bahkan jika ada kesalahan memeriksa status, pastikan UI adalah default
+                console.error('checkMigrationStatus(): Kesalahan memeriksa status migrasi:', error);
                 resetMigrationUI();
             }
         }
         
         // Atur ulang status migrasi (untuk debugging)
         async function resetMigrationState() {
-            if (!confirm('Atur ulang status migrasi? Ini akan menghapus proses migrasi yang macet. Ini TIDAK akan mengembalikan file.')) { // Klarifikasi apa yang dilakukannya
+            console.log("resetMigrationState(): Memulai reset status migrasi.");
+            if (!confirm('Atur ulang status migrasi? Ini akan menghapus proses migrasi yang macet. Ini TIDAK akan mengembalikan file.')) {
                 return;
             }
             
             try {
-                // Endpoint API ini tidak ditemukan di app.py Anda.
-                // Anda perlu menambahkan endpoint /api/migration/reset di app.py
-                // Untuk saat ini, mari kita simulasikan reset atau pandu pengguna.
-                const response = await fetch('/api/migration/reset-state', { // Mengasumsikan endpoint baru untuk kesederhanaan
+                const response = await fetch('/api/migration/reset-state', {
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
-                    }
+                    },
+                    body: JSON.stringify({})
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const errorText = await response.text();
+                    console.error("resetMigrationState(): Respon API reset-state tidak OK.", response.status, errorText);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}. Detail: ${errorText}`);
                 }
                 
                 const result = await response.json();
+                console.log("resetMigrationState(): Hasil API reset-state:", result);
                 
                 if (result.success) {
                     alert('Status migrasi berhasil direset!');
@@ -567,14 +652,14 @@
                     alert('Kesalahan: ' + result.message + '. Harap periksa log server.');
                 }
             } catch (error) {
-                // Fallback jika endpoint API tidak diimplementasikan
                 alert('Endpoint API reset tidak ditemukan atau ada kesalahan. Harap mulai ulang layanan StreamHibV2 secara manual di server untuk mengatur ulang status internalnya:\n\n`sudo systemctl restart StreamHibV2.service`\n\nJuga, pertimbangkan untuk menghapus sessions.json.backup, users.json.backup, domain_config.json.backup jika Anda menginginkan kondisi yang bersih (gunakan dengan hati-hati).');
-                console.error('Kesalahan reset:', error);
+                console.error('resetMigrationState(): Kesalahan reset:', error);
             }
         }
 
-        // Fungsi baru untuk mengatur ulang UI ke status awalnya
+        // Fungsi untuk mengatur ulang UI ke status awalnya
         function resetMigrationUI() {
+            console.log("resetMigrationUI(): Mengatur ulang tampilan UI.");
             migrationInProgress = false;
             document.getElementById('migrationStatus').style.display = 'none';
             document.getElementById('logSection').style.display = 'none';
@@ -586,15 +671,12 @@
             document.getElementById('overallPercent').textContent = '0%';
             document.getElementById('currentStep').textContent = 'Menunggu untuk memulai...';
             
-            // Atur ulang semua indikator langkah
             ['connection', 'download', 'recovery'].forEach(step => {
                 updateStepIndicator(step, 'pending');
             });
             
-            // Bersihkan konten log
             document.getElementById('migrationLog').innerHTML = '<div class="text-gray-500">[LOG] Log migrasi akan muncul di sini...</div>';
             
-            // Atur ulang tampilan tombol uji koneksi
             const testBtn = document.getElementById('testBtn');
             testBtn.innerHTML = '<i class="fas fa-plug mr-2"></i>Uji Koneksi';
             testBtn.className = 'bg-yellow-500 hover:bg-yellow-600 text-white px-6 py-3 rounded-lg transition-colors';
