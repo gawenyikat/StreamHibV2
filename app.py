@@ -1424,9 +1424,22 @@ if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
 @socketio.on('connect')
 def handle_connect():
     logging.info("Klien terhubung")
-    if 'user' not in session: 
+    # Periksa apakah pengguna (pelanggan) atau admin login
+    # Untuk panel admin, session['admin_user'] diatur
+    # Untuk panel pelanggan, session['user'] diatur
+    if 'user' not in session and 'admin_user' not in session: # BARIS INI DIUBAH
         logging.warning("Klien tanpa sesi login aktif ditolak.")
-        return False 
+        return False
+    
+    # Jika ini koneksi admin, pastikan mereka berada dalam konteks panel admin
+    if 'admin_user' in session:
+        logging.info(f"Admin '{session['admin_user']}' terhubung via Socket.IO.")
+    elif 'user' in session:
+        logging.info(f"Pengguna '{session['user']}' terhubung via Socket.IO.")
+    else:
+        # Fallback, seharusnya tidak terjadi dengan pemeriksaan di atas
+        logging.warning("Koneksi Socket.IO diterima tanpa sesi pengguna atau admin yang jelas.")
+
     with socketio_lock:
         socketio.emit('videos_update', get_videos_list_data())
         socketio.emit('sessions_update', get_active_sessions_data())
