@@ -33,7 +33,7 @@
 #### Download dan jalankan installer
 
 ```bash
-wget https://raw.githubusercontent.com/emuhib/StreamHibV2/main/install_streamhib.sh
+wget https://raw.githubusercontent.com/gawenyikat/StreamHibV2/main/install_streamhib.sh
 
 ```
 Gasskan
