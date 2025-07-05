@@ -2796,6 +2796,109 @@ def migration_recovery():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
+@app.route('/api/migration/current-status', methods=['GET'])
+@admin_required
+def get_migration_current_status():
+    global migration_in_progress
+    return jsonify({'migration_in_progress': migration_in_progress}), 200
+
+def perform_migration(ip, username, password):
+    """Melakukan proses migrasi yang sebenarnya"""
+    global migration_in_progress # Deklarasikan global untuk memodifikasinya
+    try:
+        # Pancarkan pembaruan progres
+        socketio.emit('migration_log', {'message': 'Memulai proses migrasi...', 'type': 'info'})
+        socketio.emit('migration_progress', {'step': 'connection', 'progress': 10, 'message': 'Menghubungkan ke server lama...'})
+        
+        # Buat cadangan file saat ini
+        backup_current_files()
+        
+        # Hubungkan ke server lama
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(ip, port=22, username=username, password=password, timeout=30)
+        
+        socketio.emit('migration_log', {'message': 'Berhasil terhubung ke server lama', 'type': 'success'})
+        socketio.emit('migration_progress', {'step': 'download', 'progress': 30, 'message': 'Mengunduh file...'})
+        
+        # Unduh file menggunakan SCP
+        with SCPClient(ssh.get_transport()) as scp_client:
+            # Unduh sessions.json
+            socketio.emit('migration_log', {'message': 'Mengunduh sessions.json...', 'type': 'info'})
+            try:
+                scp_client.get('/root/StreamHibV2/sessions.json', 'sessions.json')
+                socketio.emit('migration_log', {'message': 'sessions.json berhasil diunduh', 'type': 'success'})
+            except Exception as e:
+                socketio.emit('migration_log', {'message': f'Peringatan: Tidak dapat mengunduh sessions.json: {str(e)}', 'type': 'warning'})
+            
+            socketio.emit('migration_progress', {'step': 'download', 'progress': 40, 'message': 'Mengunduh data pengguna...'})
+            
+            # Unduh users.json
+            socketio.emit('migration_log', {'message': 'Mengunduh users.json...', 'type': 'info'})
+            try:
+                scp_client.get('/root/StreamHibV2/users.json', 'users.json')
+                socketio.emit('migration_log', {'message': 'users.json berhasil diunduh', 'type': 'success'})
+            except Exception as e:
+                socketio.emit('migration_log', {'message': f'Peringatan: Tidak dapat mengunduh users.json: {str(e)}', 'type': 'warning'})
+            
+            socketio.emit('migration_progress', {'step': 'download', 'progress': 50, 'message': 'Mengunduh konfigurasi domain...'})
+            
+            # Unduh domain_config.json
+            socketio.emit('migration_log', {'message': 'Mengunduh domain_config.json...', 'type': 'info'})
+            try:
+                scp_client.get('/root/StreamHibV2/domain_config.json', 'domain_config.json')
+                socketio.emit('migration_log', {'message': 'domain_config.json berhasil diunduh', 'type': 'success'})
+            except Exception as e:
+                socketio.emit('migration_log', {'message': f'Peringatan: Tidak dapat mengunduh domain_config.json: {str(e)}', 'type': 'warning'})
+            
+            socketio.emit('migration_progress', {'step': 'download', 'progress': 60, 'message': 'Mengunduh video...'})
+            
+            # Unduh direktori video
+            socketio.emit('migration_log', {'message': 'Mengunduh direktori video...', 'type': 'info'})
+            try:
+                # Buat direktori video jika tidak ada
+                os.makedirs('videos', exist_ok=True)
+                
+                # Dapatkan daftar file video
+                stdin, stdout, stderr = ssh.exec_command('find /root/StreamHibV2/videos -type f -name "*.mp4" -o -name "*.avi" -o -name "*.mkv" -o -name "*.mov"')
+                video_files = stdout.read().decode().strip().split('\n')
+                
+                if video_files and video_files[0]:  # Periksa apakah ada file video
+                    total_videos = len(video_files)
+                    for i, video_file in enumerate(video_files):
+                        if video_file.strip():  # Lewati baris kosong
+                            video_name = os.path.basename(video_file)
+                            socketio.emit('migration_log', {'message': f'Mengunduh {video_name}... ({i+1}/{total_videos})', 'type': 'info'})
+                            scp_client.get(video_file, f'videos/{video_name}')
+                            
+                            # Perbarui progres
+                            video_progress = 60 + (30 * (i + 1) / total_videos)
+                            socketio.emit('migration_progress', {'step': 'download', 'progress': int(video_progress), 'message': f'Mengunduh video... ({i+1}/{total_videos})'})
+                    
+                    socketio.emit('migration_log', {'message': f'Semua {total_videos} video berhasil diunduh', 'type': 'success'})
+                else:
+                    socketio.emit('migration_log', {'message': 'Tidak ada file video yang ditemukan di server lama', 'type': 'warning'})
+                    
+            except Exception as e:
+                socketio.emit('migration_log', {'message': f'Peringatan: Tidak dapat mengunduh video: {str(e)}', 'type': 'warning'})
+        
+        ssh.close()
+        
+        socketio.emit('migration_progress', {'step': 'download', 'progress': 90, 'message': 'Pengunduhan selesai'})
+        socketio.emit('migration_log', {'message': 'Semua file berhasil diunduh', 'type': 'success'})
+        
+        socketio.emit('migration_progress', {'step': 'recovery', 'progress': 100, 'message': 'Migrasi selesai! Siap untuk pemulihan manual.'})
+        socketio.emit('migration_complete', {'message': 'Migrasi berhasil diselesaikan'})
+        
+        # Atur ulang migration_in_progress setelah berhasil selesai
+        migration_in_progress = False
+        
+    except Exception as e:
+        migration_in_progress = False # Pastikan diatur ulang bahkan saat terjadi kesalahan
+        
+        socketio.emit('migration_log', {'message': f'Migrasi gagal: {str(e)}', 'type': 'error'})
+        socketio.emit('migration_error', {'message': str(e)})
+
 @app.route('/api/migration/rollback', methods=['POST'])
 @admin_required
 def migration_rollback():
