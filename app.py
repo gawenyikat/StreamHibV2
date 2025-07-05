@@ -639,8 +639,7 @@ def perform_startup_recovery():
         # 2. Pulihkan jadwal
         recover_scheduled_sessions()
         
-        # 3. Sinkronisasi data
-        check_systemd_sessions()
+        # 3. Sinkronisasi data (BARIS INI DIHAPUS DARI SINI)
         
         logging.info("=== PROSES RECOVERY STARTUP SELESAI ===")
         
@@ -1403,8 +1402,19 @@ if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
     # 2. Lakukan recovery lengkap (sesi yatim, dll)
     perform_startup_recovery()
     
-    # 3. Setup job monitoring rutin
-    scheduler.add_job(check_systemd_sessions, 'interval', minutes=1, id="check_systemd_job", replace_existing=True)
+    # --- TAMBAHAN KODE DI SINI ---
+    # Beri jeda waktu yang cukup (misal 30 detik) agar service systemd punya waktu untuk start
+    logging.info("RECOVERY STARTUP: Memberi jeda 30 detik agar layanan systemd terdaftar dan aktif...")
+    time.sleep(30) # Jeda 30 detik
+    
+    # Panggil check_systemd_sessions() setelah jeda untuk sinkronisasi awal
+    logging.info("RECOVERY STARTUP: Melakukan sinkronisasi akhir setelah jeda...")
+    check_systemd_sessions()
+    # --- AKHIR TAMBAHAN KODE ---
+    
+    # 3. Setup job monitoring rutin (dijalankan setelah grace period awal)
+    # Mengubah frekuensi dari 1 menit menjadi 1 jam, seperti yang disarankan pengguna.
+    scheduler.add_job(check_systemd_sessions, 'interval', hours=1, id="check_systemd_job", replace_existing=True) # <--- BARIS INI DIUBAH
     
     # 4. Setup job recovery berkala (setiap 5 menit)
     scheduler.add_job(recover_orphaned_sessions, 'interval', minutes=5, id="recovery_job", replace_existing=True)
