@@ -99,28 +99,38 @@ check_command "Install pustaka Python global"
 # 2. Otomatisasi Penyiapan Kuota Disk (Jika belum aktif di fstab)
 print_status "Mengecek dan mengaktifkan kuota disk di /etc/fstab (jika belum)..."
 FSTAB_LINE=$(grep -E "\s/\s" /etc/fstab) # Cari baris partisi root
-if [[ "$FSTAB_LINE" != *usrjquota* ]]; then
-    print_warning "Opsi kuota belum aktif di /etc/fstab. Mengaktifkan sekarang."
+# Cek apakah opsi kuota ext4 native (usrquota,grpquota) sudah ada
+if [[ "$FSTAB_LINE" != *usrquota* || "$FSTAB_LINE" != *grpquota* ]]; then
+    print_warning "Opsi kuota (usrquota,grpquota) belum aktif di /etc/fstab atau ada kesalahan. Mengaktifkan sekarang."
     sudo cp /etc/fstab /etc/fstab.bak # Backup fstab
-    # Tambahkan opsi kuota ke baris partisi root (setelah opsi yang ada, sebelum 0 1)
-    sed -i.bak '/\s\/\s/s/\(errors=remount-ro\|defaults\)\(.*\)\(0\s\+1\)/&,usrjquota=aquota.user,grpjquota=aquota.group,jqfmt=vfsv0/' /etc/fstab
+    # ====================================================================
+    # PERBAIKAN KRITIS: Mengubah perintah sed untuk menambahkan opsi kuota yang BENAR
+    # Ini akan mencari baris root dan menambahkan 'usrquota,grpquota'
+    # ====================================================================
+    sed -i.bak '/\s\/\s/s/\(errors=remount-ro\|defaults\)\(.*\)\(0\s\+1\)/&,usrquota,grpquota/' /etc/fstab
     check_command "Modifikasi /etc/fstab untuk kuota"
 
     print_warning "Perubahan /etc/fstab telah dilakukan. Kuota mungkin tidak sepenuhnya aktif sampai server di-REBOOT."
     print_warning "Anda bisa me-reboot sekarang atau melanjutkan instalasi. Jika melanjutkan, kuota akan aktif setelah reboot berikutnya."
     
-    # Coba remount untuk mengaktifkan kuota tanpa reboot, tapi tidak selalu sempurna
-    mount -o remount /
-    check_command "Remount partisi root"
+    # Hapus file kuota lama jika ada, karena kita pakai native ext4 quota
+    rm -f /aquota.user /aquota.group || true
     
-    # Buat file kuota dan aktifkan
-    quotacheck -cvug / || true # quotacheck bisa gagal jika remount tidak sempurna, jadi izinkan kegagalan
-    quotaon -ug / || true # quotaon juga bisa gagal, izinkan kegagalan
+    # Coba remount untuk mengaktifkan kuota tanpa reboot, tapi tidak selalu sempurna
+    mount -o remount / || true # Izinkan remount gagal jika busy
+    check_command "Percobaan remount partisi root"
+    
+    # Buat file kuota internal ext4 dan aktifkan
+    # Gunakan -F ext4 untuk memastikan quotacheck menggunakan fitur ext4 native
+    # Gunakan -m untuk force checking jika remount read-only gagal
+    quotacheck -cvugm -F ext4 / || true # Izinkan kegagalan jika busy
+    quotaon -ug / || true # Izinkan kegagalan jika tidak sepenuhnya siap
     print_status "Percobaan awal quotacheck dan quotaon selesai. Reboot mungkin masih diperlukan."
 else
-    print_status "Opsi kuota sudah aktif di /etc/fstab. Melanjutkan."
-    # Jika kuota sudah aktif, pastikan file kuota ada dan aktifkan
-    quotacheck -cvug / || true
+    print_status "Opsi kuota (usrquota,grpquota) sudah aktif di /etc/fstab. Melanjutkan."
+    # Jika kuota sudah aktif, pastikan file kuota lama dihapus dan aktifkan
+    rm -f /aquota.user /aquota.group || true
+    quotacheck -cvugm -F ext4 / || true
     quotaon -ug / || true
 fi
 
@@ -139,8 +149,8 @@ check_command "Clone repository ke ${INSTANCE_DIR}"
 
 cd "${INSTANCE_DIR}"
 
-# 4. Buat user sistem khusus untuk instans ini (jika belum ada)
-print_status "Membuat user sistem '${USER_SYS}' dan grup '${USER_SYS}' (jika belum ada)..."
+# 4. Buat user sistem khusus dan grup untuk instans ini
+print_status "Membuat grup sistem '${USER_SYS}' (jika belum ada)..."
 if ! getent group "$USER_SYS" >/dev/null; then # Cek apakah grup sudah ada
     addgroup --system "$USER_SYS"
     check_command "Buat grup sistem '$USER_SYS'"
@@ -148,9 +158,12 @@ else
     print_status "Grup sistem '$USER_SYS' sudah ada. Melanjutkan."
 fi
 
+print_status "Membuat user sistem '${USER_SYS}' (jika belum ada) dan menambahkannya ke grupnya..."
 if ! id -u "$USER_SYS" >/dev/null 2>&1; then
-    # Tambahkan user ke grup yang baru dibuat
-    adduser --system --no-create-home --ingroup "$USER_SYS" "$USER_SYS"
+    # ====================================================================
+    # PERBAIKAN KRITIS: Menggunakan useradd untuk pembuatan user sistem
+    # ====================================================================
+    useradd --system --no-create-home -g "$USER_SYS" "$USER_SYS"
     check_command "Buat user sistem '$USER_SYS'"
 else
     print_status "User sistem '$USER_SYS' sudah ada. Melanjutkan."
@@ -169,9 +182,7 @@ check_command "Buat virtual environment"
 # 7. Aktivasi venv dan install dependensi Python di dalam venv
 print_status "Menginstall dependensi Python di dalam virtual environment..."
 source "${INSTANCE_DIR}/venv/bin/activate"
-# ====================================================================
-# PERUBAHAN DI SINI: Kembali ke daftar paket eksplisit, tanpa requirements.txt
-# ====================================================================
+# Kembali ke daftar paket eksplisit, tanpa requirements.txt
 pip install flask flask-socketio flask-cors filelock apscheduler pytz gunicorn eventlet paramiko scp
 check_command "Install dependensi Python di venv"
 deactivate # Keluar dari virtual environment
@@ -212,9 +223,7 @@ After=network.target
 [Service]
 # Pastikan variabel lingkungan tersedia sebelum ExecStart
 Environment="STREAMHIB_BASE_DIR=${INSTANCE_DIR}"
-# ====================================================================
 # PENTING: Layanan berjalan di bawah user sistem khusus
-# ====================================================================
 User=${USER_SYS}
 Group=${USER_SYS}
 # Gunakan bash -c untuk memastikan perintah dieksekusi di shell yang benar
