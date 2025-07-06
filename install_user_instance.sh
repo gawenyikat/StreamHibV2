@@ -84,17 +84,13 @@ print_status "Memastikan dependensi dasar terinstal (ini mungkin butuh waktu)...
 apt update && apt upgrade -y && apt dist-upgrade -y
 check_command "Update sistem"
 
-# ====================================================================
-# PERUBAHAN DI SINI: gunicorn dan eventlet DIHAPUS dari apt install
+# gunicorn dan eventlet DIHAPUS dari apt install
 # Karena mereka adalah pustaka Python, bukan paket sistem.
-# ====================================================================
 apt install -y python3 python3-pip python3-venv ffmpeg git curl wget sudo ufw nginx certbot python3-certbot-nginx
 check_command "Install dependensi dasar sistem"
 
 # Instal gdown dan pustaka Python lainnya secara global yang mungkin diperlukan oleh skrip atau untuk kemudahan.
-# ====================================================================
 # gunicorn dan eventlet sudah diinstal di sini atau di venv.
-# ====================================================================
 print_status "Menginstall gdown dan pustaka Python global..."
 pip3 install gdown paramiko scp
 check_command "Install pustaka Python global"
@@ -118,9 +114,7 @@ check_command "Buat virtual environment"
 # 4. Aktivasi venv dan install dependensi Python di dalam venv
 print_status "Menginstall dependensi Python di dalam virtual environment..."
 source "${INSTANCE_DIR}/venv/bin/activate"
-# ====================================================================
 # gunicorn dan eventlet DIINSTAL DI SINI (di dalam virtual environment)
-# ====================================================================
 pip install flask flask-socketio flask-cors filelock apscheduler pytz gunicorn eventlet paramiko scp
 check_command "Install dependensi Python di venv"
 deactivate # Keluar dari virtual environment
@@ -166,13 +160,19 @@ Environment="STREAMHIB_BASE_DIR=${INSTANCE_DIR}"
 # Gunakan bash -c untuk memastikan perintah dieksekusi di shell yang benar
 # dan cd ke WorkingDirectory secara eksplisit di dalam perintah
 ExecStart=/bin/bash -c "cd ${INSTANCE_DIR} && source venv/bin/activate && ${INSTANCE_DIR}/venv/bin/gunicorn --worker-class eventlet -w 1 -b 0.0.0.0:${INSTANCE_PORT} app:app"
-# WorkingDirectory tetap ada, tapi ExecStart akan meng-override-nya dengan cd
-# WorkingDirectory=${INSTANCE_DIR}
 ExecReload=/bin/bash -c "kill -HUP \$MAINPID" # Perintah untuk graceful reload Gunicorn
 Restart=always
-User=root # Tetap root atau user non-root yang Anda buat
+# ====================================================================
+# PERUBAHAN DI SINI: Baris User=root DIHAPUS.
+# Systemd akan default ke root jika tidak ada User= yang ditentukan.
+# Ini untuk mengatasi error 'status=217/USER'.
+# ====================================================================
+# User=root # Baris ini dihapus
 # Tambahkan TimeoutStartSec untuk memberi waktu lebih bagi aplikasi untuk memulai
 TimeoutStartSec=120 # Beri waktu 120 detik (2 menit) untuk memulai
+
+StandardOutput=append:${INSTANCE_DIR}/gunicorn_stdout.log
+StandardError=append:${INSTANCE_DIR}/gunicorn_stderr.log
 
 [Install]
 WantedBy=multi-user.target
@@ -182,12 +182,15 @@ check_command "Buat systemd service ${SERVICE_NAME}"
 # 10. Reload systemd dan enable service
 print_status "Mengaktifkan service ${SERVICE_NAME}..."
 systemctl daemon-reload
+# Tambahkan jeda singkat setelah daemon-reload untuk memastikan systemd memprosesnya
 sleep 1
 systemctl enable "${SERVICE_NAME}"
 check_command "Enable service ${SERVICE_NAME}"
 
 # 11. Start service
 print_status "Memulai StreamHib V2 untuk ${INSTANCE_USERNAME}..."
+# Tambahkan jeda singkat sebelum start jika diperlukan
+sleep 2 # Memberi waktu lebih bagi aplikasi untuk memulai
 systemctl start "${SERVICE_NAME}"
 check_command "Start service ${SERVICE_NAME}"
 
@@ -227,9 +230,15 @@ print_status "Setup Domain (Opsional) untuk ${INSTANCE_USERNAME}:"
 echo "  1. Arahkan domain unik (misal ${INSTANCE_USERNAME}.domainanda.com) ke IP: ${SERVER_IP}"
 echo "  2. Tunggu propagasi DNS (5-15 menit)."
 echo "  3. Akses panel StreamHib untuk instans ini: http://${SERVER_IP}:${INSTANCE_PORT}"
-echo "  4. Login ke panel admin (default: admin / streamhib2025)."
-echo "  5. Masuk menu 'Pengaturan Domain'."
-echo "  6. Setup domain Anda dengan SSL otomatis."
+# Perbaikan IP di sini, sebelumnya pakai IPv6
+if [[ "$SERVER_IP" =~ ":" ]]; then # Cek jika IP adalah IPv6
+    print_status "  3. Akses panel StreamHib untuk instans ini: http://[${SERVER_IP}]:${INSTANCE_PORT}"
+else
+    print_status "  3. Akses panel StreamHib untuk instans ini: http://${SERVER_IP}:${INSTANCE_PORT}"
+fi
+print_status "  4. Login ke panel admin (default: admin / streamhib2025)."
+print_status "  5. Masuk menu 'Pengaturan Domain'."
+print_status "  6. Setup domain Anda dengan SSL otomatis."
 echo ""
 print_status "Perintah Berguna untuk instans ini:"
 echo "  Status service: systemctl status ${SERVICE_NAME}"
