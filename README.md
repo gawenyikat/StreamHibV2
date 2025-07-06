@@ -72,12 +72,12 @@ Langkah-langkah ini menyiapkan fondasi sistem operasi Anda.
         Atau:
         `/dev/sda1 / ext4 defaults 0 1`
 
-    * **Tambahkan opsi kuota:** Tambahkan `,usrjquota=aquota.user,grpjquota=aquota.group,jqfmt=vfsv0` ke opsi yang sudah ada.
+    * **Tambahkan opsi kuota:** Tambahkan `,usrquota,grpquota` ke opsi yang sudah ada.
 
         **Contoh** setelah perubahan **(sesuaikan dengan baris Anda):**
 
         ```ini
-        UUID=00944838-9498-46f2-bd9e-e84e0eedd91a / ext4 errors=remount-ro,usrjquota=aquota.user,grpjquota=aquota.group,jqfmt=vfsv0 0 1
+        UUID=00944838-9498-46f2-bd9e-e84e0eedd91a / ext4 errors=remount-ro,usrquota,grpquota 0 1
         ```
 
         *(Jangan* ubah `UUID` atau `/dev/sda1` yang sudah *ada di sistem Anda. Hanya tambahkan opsi kuota setelah opsi mount yang ada.)*
