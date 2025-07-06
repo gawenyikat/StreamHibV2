@@ -178,6 +178,7 @@ check_command "Buat systemd service ${SERVICE_NAME}"
 # 10. Reload systemd dan enable service
 print_status "Mengaktifkan service ${SERVICE_NAME}..."
 systemctl daemon-reload
+sleep 1
 systemctl enable "${SERVICE_NAME}"
 check_command "Enable service ${SERVICE_NAME}"
 
