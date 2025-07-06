@@ -86,7 +86,7 @@ check_command "Update sistem"
 
 # Instal semua dependensi yang diperlukan. Beberapa mungkin sudah terinstal.
 # Tambahkan gunicorn dan eventlet di sini karena mereka digunakan oleh systemd service.
-apt install -y python3 python3-pip python3-venv ffmpeg git curl wget sudo ufw nginx certbot python3-certbot-nginx gunicorn eventlet
+apt install -y python3 python3-pip python3-venv ffmpeg git curl wget sudo ufw nginx certbot python3-certbot-nginx
 check_command "Install dependensi dasar sistem"
 
 # Instal gdown dan pustaka Python lainnya secara global yang mungkin diperlukan oleh skrip atau untuk kemudahan.
