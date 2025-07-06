@@ -140,9 +140,17 @@ check_command "Clone repository ke ${INSTANCE_DIR}"
 cd "${INSTANCE_DIR}"
 
 # 4. Buat user sistem khusus untuk instans ini (jika belum ada)
-print_status "Membuat user sistem '${USER_SYS}' (jika belum ada)..."
+print_status "Membuat user sistem '${USER_SYS}' dan grup '${USER_SYS}' (jika belum ada)..."
+if ! getent group "$USER_SYS" >/dev/null; then # Cek apakah grup sudah ada
+    addgroup --system "$USER_SYS"
+    check_command "Buat grup sistem '$USER_SYS'"
+else
+    print_status "Grup sistem '$USER_SYS' sudah ada. Melanjutkan."
+fi
+
 if ! id -u "$USER_SYS" >/dev/null 2>&1; then
-    adduser --system --no-create-home "$USER_SYS"
+    # Tambahkan user ke grup yang baru dibuat
+    adduser --system --no-create-home --ingroup "$USER_SYS" "$USER_SYS"
     check_command "Buat user sistem '$USER_SYS'"
 else
     print_status "User sistem '$USER_SYS' sudah ada. Melanjutkan."
