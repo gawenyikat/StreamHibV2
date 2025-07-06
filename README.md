@@ -57,12 +57,14 @@ Langkah-langkah ini menyiapkan fondasi sistem operasi Anda.
 
         ```bash
         sudo cp /etc/fstab /etc/fstab.bak
+        
         ```
 
     * **Buka `fstab` dengan editor `nano`:**
 
         ```bash
         sudo nano /etc/fstab
+        
         ```
 
     * **Cari** baris **partisi root Anda (`/`).** Contohnya mungkin terlihat seperti ini:
@@ -177,7 +179,7 @@ Ini adalah bagian di mana Anda membuat instans StreamHibV2 terpisah untuk setiap
     * **Unduh** skrip installer **terbaru:**
 
         ```bash
-        wget [https://raw.githubusercontent.com/gawenyikat/StreamHibV2/main/install_user_instance.sh](https://raw.githubusercontent.com/gawenyikat/StreamHibV2/main/install_streamhib.sh)
+        wget https://raw.githubusercontent.com/gawenyikat/StreamHibV2/main/install_streamhib.sh
         chmod +x install_streamhib.sh.sh
         
         ```
