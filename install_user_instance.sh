@@ -84,13 +84,17 @@ print_status "Memastikan dependensi dasar terinstal (ini mungkin butuh waktu)...
 apt update && apt upgrade -y && apt dist-upgrade -y
 check_command "Update sistem"
 
-# Instal semua dependensi yang diperlukan. Beberapa mungkin sudah terinstal.
-# Tambahkan gunicorn dan eventlet di sini karena mereka digunakan oleh systemd service.
+# ====================================================================
+# PERUBAHAN DI SINI: gunicorn dan eventlet DIHAPUS dari apt install
+# Karena mereka adalah pustaka Python, bukan paket sistem.
+# ====================================================================
 apt install -y python3 python3-pip python3-venv ffmpeg git curl wget sudo ufw nginx certbot python3-certbot-nginx
 check_command "Install dependensi dasar sistem"
 
 # Instal gdown dan pustaka Python lainnya secara global yang mungkin diperlukan oleh skrip atau untuk kemudahan.
-# Meskipun paket Flask dkk akan diinstal di venv, beberapa alat seperti gdown mungkin lebih mudah diakses secara global.
+# ====================================================================
+# gunicorn dan eventlet sudah diinstal di sini atau di venv.
+# ====================================================================
 print_status "Menginstall gdown dan pustaka Python global..."
 pip3 install gdown paramiko scp
 check_command "Install pustaka Python global"
@@ -114,6 +118,9 @@ check_command "Buat virtual environment"
 # 4. Aktivasi venv dan install dependensi Python di dalam venv
 print_status "Menginstall dependensi Python di dalam virtual environment..."
 source "${INSTANCE_DIR}/venv/bin/activate"
+# ====================================================================
+# gunicorn dan eventlet DIINSTAL DI SINI (di dalam virtual environment)
+# ====================================================================
 pip install flask flask-socketio flask-cors filelock apscheduler pytz gunicorn eventlet paramiko scp
 check_command "Install dependensi Python di venv"
 deactivate # Keluar dari virtual environment
@@ -137,16 +144,6 @@ if [ ! -f "static/logostreamhib.png" ]; then
     touch static/logostreamhib.png
 fi
 
-# ====================================================================
-# PERUBAHAN: Hapus baris chmod 777 untuk file konfigurasi.
-# File-file ini akan dibuat oleh aplikasi dengan izin default,
-# dan filelock akan menangani akses bersama.
-# ====================================================================
-# print_status "Mengatur permission file..."
-# touch sessions.json users.json domain_config.json
-# chmod 777 sessions.json users.json domain_config.json
-# check_command "Set permission file"
-
 # 8. Setup firewall untuk port instans ini
 print_status "Mengkonfigurasi firewall untuk port ${INSTANCE_PORT}..."
 ufw allow "${INSTANCE_PORT}/tcp" comment "StreamHibV2 ${INSTANCE_USERNAME} Access"
@@ -165,7 +162,7 @@ After=network.target
 
 [Service]
 # ====================================================================
-# PERUBAHAN UTAMA: Setel variabel lingkungan untuk DIRECTORY_BASE
+# Setel variabel lingkungan untuk DIRECTORY_BASE
 # ====================================================================
 Environment="STREAMHIB_BASE_DIR=${INSTANCE_DIR}"
 ExecStart=${INSTANCE_DIR}/venv/bin/gunicorn --worker-class eventlet -w 1 -b 0.0.0.0:${INSTANCE_PORT} app:app
@@ -182,15 +179,11 @@ check_command "Buat systemd service ${SERVICE_NAME}"
 print_status "Mengaktifkan service ${SERVICE_NAME}..."
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
-# Nginx hanya perlu di-enable sekali secara global, tidak per instans.
-# systemctl enable nginx # Hapus ini dari skrip per instans
 check_command "Enable service ${SERVICE_NAME}"
 
 # 11. Start service
 print_status "Memulai StreamHib V2 untuk ${INSTANCE_USERNAME}..."
 systemctl start "${SERVICE_NAME}"
-# Nginx hanya perlu di-start sekali secara global, tidak per instans.
-# systemctl start nginx # Hapus ini dari skrip per instans
 check_command "Start service ${SERVICE_NAME}"
 
 # 12. Cek status service
