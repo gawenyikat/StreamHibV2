@@ -161,14 +161,18 @@ Description=StreamHib Flask Service for ${INSTANCE_USERNAME} (Port ${INSTANCE_PO
 After=network.target
 
 [Service]
-# ====================================================================
-# Setel variabel lingkungan untuk DIRECTORY_BASE
-# ====================================================================
+# Pastikan variabel lingkungan tersedia sebelum ExecStart
 Environment="STREAMHIB_BASE_DIR=${INSTANCE_DIR}"
-ExecStart=${INSTANCE_DIR}/venv/bin/gunicorn --worker-class eventlet -w 1 -b 0.0.0.0:${INSTANCE_PORT} app:app
-WorkingDirectory=${INSTANCE_DIR}
+# Gunakan bash -c untuk memastikan perintah dieksekusi di shell yang benar
+# dan cd ke WorkingDirectory secara eksplisit di dalam perintah
+ExecStart=/bin/bash -c "cd ${INSTANCE_DIR} && source venv/bin/activate && ${INSTANCE_DIR}/venv/bin/gunicorn --worker-class eventlet -w 1 -b 0.0.0.0:${INSTANCE_PORT} app:app"
+# WorkingDirectory tetap ada, tapi ExecStart akan meng-override-nya dengan cd
+# WorkingDirectory=${INSTANCE_DIR}
+ExecReload=/bin/bash -c "kill -HUP \$MAINPID" # Perintah untuk graceful reload Gunicorn
 Restart=always
-User=root # Anda bisa mengganti ini dengan user non-root khusus jika menerapkan kuota per user Linux
+User=root # Tetap root atau user non-root yang Anda buat
+# Tambahkan TimeoutStartSec untuk memberi waktu lebih bagi aplikasi untuk memulai
+TimeoutStartSec=120 # Beri waktu 120 detik (2 menit) untuk memulai
 
 [Install]
 WantedBy=multi-user.target
