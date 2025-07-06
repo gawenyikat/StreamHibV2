@@ -3,7 +3,7 @@ from flask_socketio import SocketIO
 import shlex
 import subprocess
 import os
-import logging
+import logging # Pastikan ini sudah diimpor
 from functools import wraps
 import re
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -15,32 +15,46 @@ import paramiko
 from scp import SCPClient
 import shutil
 import glob
-from pytz import timezone # Pastikan pytz terinstal: pip install pytz
+from pytz import timezone
 from threading import Lock
 import shutil
 from flask import send_from_directory
-from apscheduler.jobstores.base import JobLookupError # Tambahkan import ini
+from apscheduler.jobstores.base import JobLookupError
 import time
 import paramiko
 import scp
 import threading
 
-# Konfigurasi logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(levelname)s] %(message)s')
+# Dapatkan DIRECTORY_BASE dari variabel lingkungan atau gunakan default
+# Ini akan menjadi direktori akar untuk instans StreamHibV2 ini (misal /root/StreamHibV2-user1)
+DIRECTORY_BASE = os.environ.get('STREAMHIB_BASE_DIR', os.path.dirname(os.path.abspath(__file__)))
 
-# Path Konfigurasi
-SESSION_FILE = '/root/StreamHibV2/sessions.json'
-LOCK_FILE = SESSION_FILE + '.lock'
-VIDEO_DIR = "videos"
+# Gunakan DIRECTORY_BASE untuk semua file konfigurasi dan data
+SESSION_FILE = os.path.join(DIRECTORY_BASE, 'sessions.json')
+LOCK_FILE = SESSION_FILE + '.lock' # Pastikan lock file juga terpisah
+VIDEO_DIR = os.path.join(DIRECTORY_BASE, "videos")
+# SERVICE_DIR tetap global karena systemd services berada di lokasi sistem
 SERVICE_DIR = "/etc/systemd/system"
-USERS_FILE = '/root/StreamHibV2/users.json'
-DOMAIN_CONFIG_FILE = '/root/StreamHibV2/domain_config.json'
+USERS_FILE = os.path.join(DIRECTORY_BASE, 'users.json')
+DOMAIN_CONFIG_FILE = os.path.join(DIRECTORY_BASE, 'domain_config.json')
+
+# Pastikan direktori dibuat berdasarkan DIRECTORY_BASE
 os.makedirs(os.path.dirname(SESSION_FILE), exist_ok=True)
 os.makedirs(VIDEO_DIR, exist_ok=True)
 
 # ---- TAMBAHKAN KONFIGURASI MODE TRIAL DI SINI ----
-TRIAL_MODE_ENABLED = False  # Ganti menjadi False/True untuk mengubah
+TRIAL_MODE_ENABLED = False # Ganti menjadi False/True untuk mengubah
 TRIAL_RESET_HOURS = 2    # Atur interval reset (dalam jam)
+
+# --- MULAI BAGIAN BARU YANG PERLU ANDA TAMBAHKAN/GANTI UNTUK LOGGING ---
+# Konfigurasi logging
+LOG_FILE_PATH = os.path.join(DIRECTORY_BASE, 'streamhib_instance.log') # Jalur file log spesifik instans
+logging.basicConfig(
+    level=logging.DEBUG, # Level logging (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    filename=LOG_FILE_PATH, # Arahkan log ke file spesifik instans
+    filemode='a' # Mode 'a' untuk append (menambahkan ke file yang sudah ada)
+)
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "http://localhost:5000", "supports_credentials": True}})
