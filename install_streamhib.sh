@@ -1,86 +1,329 @@
 #!/bin/bash
 
-# === INPUT ===
-USERNAME=$1
-PORT=$2
+# StreamHib V2 - Installer Script untuk Instans Pengguna
+# Tanggal: 06/07/2025 (Diperbarui)
+# Fungsi: Instalasi instans StreamHib V2 baru dengan konfigurasi unik untuk setiap pengguna,
+#         termasuk user sistem khusus dan pengaturan kuota disk otomatis.
 
-if [ -z "$USERNAME" ] || [ -z "$PORT" ]; then
-  echo "Usage: $0 <username_instans> <port>"
-  exit 1
+set -e # Keluar jika ada kesalahan
+
+# Warna untuk output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Fungsi untuk print dengan warna
+print_status() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Fungsi untuk mengecek apakah command berhasil
+check_command() {
+    if [ $? -eq 0 ]; then
+        print_success "$1"
+    else
+        print_error "Gagal: $1"
+        exit 1
+    fi
+}
+
+# Header
+echo -e "${GREEN}"
+echo "=================================================="
+echo "    StreamHib V2 - Auto Installer Instans Pengguna"
+echo "    Tanggal: 06/07/2025"
+echo "    Platform: Debian 11 (Ubuntu Compatible)"
+echo "    Fitur: Multi-Instans, Domain Support, Kuota Disk (via OS)"
+echo "=================================================="
+echo -e "${NC}"
+
+# Cek apakah running sebagai root
+if [ "$EUID" -ne 0 ]; then
+    print_error "Skrip ini harus dijalankan sebagai root!"
+    print_status "Gunakan: sudo bash install_user_instance.sh <username_instans> <port_instans>"
+    exit 1
 fi
 
-APP_DIR="/root/StreamHibV2-$USERNAME"
-SERVICE_FILE="/etc/systemd/system/streamhibv2-$USERNAME.service"
-USER_SYS="streamhib_$USERNAME"
+# ====================================================================
+# INPUT: Menerima argumen untuk nama pengguna dan port
+# ====================================================================
+INSTANCE_USERNAME=$1
+INSTANCE_PORT=$2
 
-# === 1. Buat direktori aplikasi ===
-mkdir -p "$APP_DIR"
-cd "$APP_DIR"
+if [ -z "$INSTANCE_USERNAME" ] || [ -z "$INSTANCE_PORT" ]; then
+    print_error "Penggunaan: sudo bash install_user_instance.sh <username_instans> <port_instans>"
+    print_status "Contoh: sudo bash install_user_instance.sh user_budi 5001"
+    exit 1
+fi
 
-# === 2. Clone kode aplikasi ===
-git clone https://github.com/gawenyikat/StreamHibV2.git temp_source
-mv temp_source/* .
-rm -rf temp_source
+# ====================================================================
+# DEFINISI VARIABEL JALUR DAN NAMA
+# ====================================================================
+INSTANCE_DIR="/root/StreamHibV2-${INSTANCE_USERNAME}"
+SERVICE_NAME="streamhibv2-${INSTANCE_USERNAME}.service"
+USER_SYS="streamhib_${INSTANCE_USERNAME}" # Nama user sistem unik untuk instans ini
 
-# === 3. Buat virtual environment ===
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+print_status "Memulai instalasi StreamHib V2 untuk pengguna: ${INSTANCE_USERNAME} di port: ${INSTANCE_PORT}"
 
-# === 4. Setup user sistem khusus ===
+# ====================================================================
+# BAGIAN GLOBAL: Persiapan Sistem (Jalankan Sekali per Server)
+# ====================================================================
+
+# 1. Update sistem dan Install dependensi dasar
+print_status "Memastikan dependensi dasar sistem terinstal (ini mungkin butuh waktu)..."
+apt update && apt upgrade -y && apt dist-upgrade -y
+check_command "Update sistem"
+
+# gunicorn dan eventlet DIHAPUS dari apt install karena mereka pustaka Python.
+apt install -y python3 python3-pip python3-venv ffmpeg git curl wget sudo ufw nginx certbot python3-certbot-nginx quota
+check_command "Install dependensi dasar sistem dan quota"
+
+# Instal gdown dan pustaka Python lainnya secara global yang mungkin diperlukan oleh skrip atau untuk kemudahan.
+pip3 install gdown paramiko scp
+check_command "Install pustaka Python global"
+
+# 2. Otomatisasi Penyiapan Kuota Disk (Jika belum aktif di fstab)
+print_status "Mengecek dan mengaktifkan kuota disk di /etc/fstab (jika belum)..."
+FSTAB_LINE=$(grep -E "\s/\s" /etc/fstab) # Cari baris partisi root
+if [[ "$FSTAB_LINE" != *usrjquota* ]]; then
+    print_warning "Opsi kuota belum aktif di /etc/fstab. Mengaktifkan sekarang."
+    sudo cp /etc/fstab /etc/fstab.bak # Backup fstab
+    # Tambahkan opsi kuota ke baris partisi root (setelah opsi yang ada, sebelum 0 1)
+    sed -i.bak '/\s\/\s/s/\(errors=remount-ro\|defaults\)\(.*\)\(0\s\+1\)/&,usrjquota=aquota.user,grpjquota=aquota.group,jqfmt=vfsv0/' /etc/fstab
+    check_command "Modifikasi /etc/fstab untuk kuota"
+
+    print_warning "Perubahan /etc/fstab telah dilakukan. Kuota mungkin tidak sepenuhnya aktif sampai server di-REBOOT."
+    print_warning "Anda bisa me-reboot sekarang atau melanjutkan instalasi. Jika melanjutkan, kuota akan aktif setelah reboot berikutnya."
+    
+    # Coba remount untuk mengaktifkan kuota tanpa reboot, tapi tidak selalu sempurna
+    mount -o remount /
+    check_command "Remount partisi root"
+    
+    # Buat file kuota dan aktifkan
+    quotacheck -cvug / || true # quotacheck bisa gagal jika remount tidak sempurna, jadi izinkan kegagalan
+    quotaon -ug / || true # quotaon juga bisa gagal, izinkan kegagalan
+    print_status "Percobaan awal quotacheck dan quotaon selesai. Reboot mungkin masih diperlukan."
+else
+    print_status "Opsi kuota sudah aktif di /etc/fstab. Melanjutkan."
+    # Jika kuota sudah aktif, pastikan file kuota ada dan aktifkan
+    quotacheck -cvug / || true
+    quotaon -ug / || true
+fi
+
+# ====================================================================
+# BAGIAN PER INSTANS: Instalasi Aplikasi dan Konfigurasi Unik
+# ====================================================================
+
+# 3. Buat direktori aplikasi dan clone repository
+print_status "Mengunduh StreamHib V2 ke ${INSTANCE_DIR}..."
+if [ -d "${INSTANCE_DIR}" ]; then
+    print_warning "Direktori ${INSTANCE_DIR} sudah ada, menghapus..."
+    rm -rf "${INSTANCE_DIR}"
+fi
+git clone https://github.com/gawenyikat/StreamHibV2.git "${INSTANCE_DIR}"
+check_command "Clone repository ke ${INSTANCE_DIR}"
+
+cd "${INSTANCE_DIR}"
+
+# 4. Buat user sistem khusus untuk instans ini (jika belum ada)
+print_status "Membuat user sistem '${USER_SYS}' (jika belum ada)..."
 if ! id -u "$USER_SYS" >/dev/null 2>&1; then
-  adduser --system --no-create-home "$USER_SYS"
+    adduser --system --no-create-home "$USER_SYS"
+    check_command "Buat user sistem '$USER_SYS'"
+else
+    print_status "User sistem '$USER_SYS' sudah ada. Melanjutkan."
 fi
 
-# === 5. Set permission direktori ===
-chown -R "$USER_SYS":"$USER_SYS" "$APP_DIR"
+# 5. Set permission direktori ke user sistem khusus
+print_status "Mengatur kepemilikan direktori '${INSTANCE_DIR}' ke user '${USER_SYS}'..."
+chown -R "$USER_SYS":"$USER_SYS" "$INSTANCE_DIR"
+check_command "Set kepemilikan direktori"
 
-# === 6. Buat systemd service ===
-cat > "$SERVICE_FILE" <<EOF
+# 6. Buat virtual environment
+print_status "Membuat virtual environment di ${INSTANCE_DIR}/venv..."
+python3 -m venv "${INSTANCE_DIR}/venv"
+check_command "Buat virtual environment"
+
+# 7. Aktivasi venv dan install dependensi Python di dalam venv
+print_status "Menginstall dependensi Python di dalam virtual environment..."
+source "${INSTANCE_DIR}/venv/bin/activate"
+# ====================================================================
+# PERUBAHAN DI SINI: Kembali ke daftar paket eksplisit, tanpa requirements.txt
+# ====================================================================
+pip install flask flask-socketio flask-cors filelock apscheduler pytz gunicorn eventlet paramiko scp
+check_command "Install dependensi Python di venv"
+deactivate # Keluar dari virtual environment
+
+# 8. Buat direktori 'videos', 'static', 'templates' (jika belum ada)
+print_status "Memastikan direktori 'videos', 'static', 'templates' ada..."
+mkdir -p videos static templates
+check_command "Buat direktori 'videos', 'static', 'templates'"
+
+# 9. Buat file favicon.ico dummy jika tidak ada
+if [ ! -f "static/favicon.ico" ]; then
+    print_status "Membuat favicon dummy..."
+    touch static/favicon.ico
+fi
+
+# 10. Buat file logo dummy jika tidak ada
+if [ ! -f "static/logostreamhib.png" ]; then
+    print_status "Membuat logo dummy..."
+    touch static/logostreamhib.png
+fi
+
+# 11. Setup firewall untuk port instans ini
+print_status "Mengkonfigurasi firewall untuk port ${INSTANCE_PORT}..."
+ufw allow "${INSTANCE_PORT}/tcp" comment "StreamHibV2 ${INSTANCE_USERNAME} Access"
+ufw allow 22/tcp comment 'SSH Access' # Pastikan SSH tetap terbuka
+ufw allow 80/tcp comment 'HTTP Access for Nginx'
+ufw allow 443/tcp comment 'HTTPS Access for Nginx'
+ufw --force enable
+check_command "Konfigurasi firewall"
+
+# 12. Buat systemd service unik untuk instans ini
+print_status "Membuat systemd service ${SERVICE_NAME}..."
+cat > "/etc/systemd/system/${SERVICE_NAME}" << EOF
 [Unit]
-Description=StreamHib Flask Service for $USERNAME (Port $PORT)
+Description=StreamHib Flask Service for ${INSTANCE_USERNAME} (Port ${INSTANCE_PORT})
 After=network.target
 
 [Service]
-User=$USER_SYS
-Group=$USER_SYS
-WorkingDirectory=$APP_DIR
-ExecStart=$APP_DIR/venv/bin/gunicorn -k eventlet -w 1 -b 0.0.0.0:$PORT app:app
+# Pastikan variabel lingkungan tersedia sebelum ExecStart
+Environment="STREAMHIB_BASE_DIR=${INSTANCE_DIR}"
+# ====================================================================
+# PENTING: Layanan berjalan di bawah user sistem khusus
+# ====================================================================
+User=${USER_SYS}
+Group=${USER_SYS}
+# Gunakan bash -c untuk memastikan perintah dieksekusi di shell yang benar
+# dan cd ke WorkingDirectory secara eksplisit di dalam perintah
+ExecStart=/bin/bash -c "cd ${INSTANCE_DIR} && source venv/bin/activate && ${INSTANCE_DIR}/venv/bin/gunicorn --worker-class eventlet -w 1 -b 0.0.0.0:${INSTANCE_PORT} app:app"
+ExecReload=/bin/bash -c "kill -HUP \$MAINPID" # Perintah untuk graceful reload Gunicorn
 Restart=always
+TimeoutStartSec=120 # Beri waktu 120 detik (2 menit) untuk memulai
+
+# Arahkan output ke file log spesifik instans untuk debugging
+StandardOutput=append:${INSTANCE_DIR}/gunicorn_stdout.log
+StandardError=append:${INSTANCE_DIR}/gunicorn_stderr.log
 
 [Install]
 WantedBy=multi-user.target
 EOF
+check_command "Buat systemd service ${SERVICE_NAME}"
 
-# === 7. Reload systemd dan enable service ===
-systemctl daemon-reexec
+# 13. Reload systemd dan enable service
+print_status "Mengaktifkan service ${SERVICE_NAME}..."
 systemctl daemon-reload
-systemctl enable streamhibv2-$USERNAME.service
-systemctl start streamhibv2-$USERNAME.service
+# Tambahkan jeda singkat setelah daemon-reload untuk memastikan systemd memprosesnya
+sleep 1
+systemctl enable "${SERVICE_NAME}"
+check_command "Enable service ${SERVICE_NAME}"
 
-# === 8. Buka firewall port ===
-ufw allow $PORT/tcp
+# 14. Start service
+print_status "Memulai StreamHib V2 untuk ${INSTANCE_USERNAME}..."
+# Tambahkan jeda singkat sebelum start jika diperlukan
+sleep 2 # Memberi waktu lebih bagi aplikasi untuk memulai
+systemctl start "${SERVICE_NAME}"
+check_command "Start service ${SERVICE_NAME}"
 
-# === 9. Tambah kuota disk (jika belum aktif) ===
-FSTAB_LINE=$(grep -E "\s/\s" /etc/fstab)
-if [[ "$FSTAB_LINE" != *usrjquota* ]]; then
-  echo "[!] Mengaktifkan quota di /etc/fstab..."
-  cp /etc/fstab /etc/fstab.bak
-  sed -i.bak '/\s\/\s/s/defaults/defaults,usrjquota=aquota.user,grpjquota=aquota.group,jqfmt=vfsv0/' /etc/fstab
-  mount -o remount /
-  quotacheck -cum /
-  quotaon -ug /
+# 15. Atur kuota default 30GB/35GB untuk user instans
+print_status "Mengatur kuota disk untuk user sistem '${USER_SYS}'..."
+SOFT_LIMIT_KB=31457280  # 30GB in KB (30 * 1024 * 1024)
+HARD_LIMIT_KB=36700160  # 35GB in KB (35 * 1024 * 1024)
+DEVICE=$(df / | tail -1 | awk '{print $1}') # Dapatkan nama device (misal /dev/sda1)
+
+# Menggunakan edquota secara non-interaktif
+# Ini akan mengatur kuota untuk user pada device yang ditemukan
+echo "$USER_SYS $DEVICE $SOFT_LIMIT_KB $HARD_LIMIT_KB 0 0" | awk '{printf "edquota -u %s <<EOF\n%s %s %s %s %s %s\nEOF\n", $1, $2, $3, $4, $5, $5, $6}' | bash
+check_command "Atur kuota disk untuk user '${USER_SYS}'"
+
+# 16. Cek status service
+sleep 3
+if systemctl is-active --quiet "${SERVICE_NAME}"; then
+    print_success "StreamHib V2 untuk ${INSTANCE_USERNAME} berhasil berjalan!"
+else
+    print_warning "Service ${SERVICE_NAME} mungkin belum siap, cek status dengan: systemctl status ${SERVICE_NAME}"
 fi
 
-# === 10. Atur kuota default 30GB/35GB untuk user instans ===
-SOFT=31457280  # 30GB in KB
-HARD=36700160  # 35GB in KB
-DEVICE=$(df / | tail -1 | awk '{print $1}')
-echo "$USER_SYS $DEVICE $SOFT $HARD 0 0" | awk '{printf "edquota -u %s <<EOF\n%s %s %s %s %s %s\nEOF\n", $1, $2, $3, $4, $5, $5, $6}' | bash
+# ====================================================================
+# TAMPILAN INFORMASI AKHIR
+# ====================================================================
+echo -e "${GREEN}"
+echo "=================================================="
+echo "    INSTALASI INSTANS SELESAI!"
+echo "=================================================="
+echo -e "${NC}"
 
-# === DONE ===
-echo -e "\nInstans $USERNAME berhasil dibuat di port $PORT."
-echo "Direktori: $APP_DIR"
-echo "User sistem: $USER_SYS"
-echo "Service: streamhibv2-$USERNAME.service"
-echo "Quota: Soft ${SOFT}KB, Hard ${HARD}KB untuk $USER_SYS di $DEVICE"
+# Dapatkan IP server (perbaikan untuk IPv6)
+SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null || hostname -I | awk '{print $1}')
+
+print_success "StreamHib V2 untuk ${INSTANCE_USERNAME} berhasil diinstall!"
+echo ""
+print_status "Informasi Akses untuk ${INSTANCE_USERNAME}:"
+echo "  URL: http://${SERVER_IP}:${INSTANCE_PORT}"
+print_status "  Port: ${INSTANCE_PORT}"
+echo ""
+print_status "Direktori instalasi: ${INSTANCE_DIR}"
+print_status "User sistem untuk instans ini: ${USER_SYS}"
+echo ""
+print_status "Fitur Baru untuk Instans Ini:"
+print_status "  ✅ Sistem Migrasi Seamless (data instans ini)"
+print_status "  ✅ Recovery Otomatis (untuk instans ini)"
+print_status "  ✅ Domain Support dengan SSL (via panel admin instans ini)"
+print_status "  ✅ Nginx Reverse Proxy (global, dikonfigurasi via panel admin instans ini)"
+print_status "  ✅ Kuota Disk 30GB/35GB untuk user '${USER_SYS}'"
+echo ""
+print_status "Setup Domain (Opsional) untuk ${INSTANCE_USERNAME}:"
+print_status "  1. Arahkan domain unik (misal ${INSTANCE_USERNAME}.domainanda.com) ke IP: ${SERVER_IP}"
+print_status "  2. Tunggu propagasi DNS (5-15 menit)."
+# Perbaikan IP di sini, sebelumnya pakai IPv6
+if [[ "$SERVER_IP" =~ ":" ]]; then # Cek jika IP adalah IPv6
+    print_status "  3. Akses panel StreamHib untuk instans ini: http://[${SERVER_IP}]:${INSTANCE_PORT}"
+else
+    print_status "  3. Akses panel StreamHib untuk instans ini: http://${SERVER_IP}:${INSTANCE_PORT}"
+fi
+print_status "  4. Login ke panel admin (default: admin / streamhib2025)."
+print_status "  5. Masuk menu 'Pengaturan Domain'."
+print_status "  6. Setup domain Anda dengan SSL otomatis."
+echo ""
+print_status "Perintah Berguna untuk instans ini:"
+print_status "  Status service: systemctl status ${SERVICE_NAME}"
+print_status "  Stop service: systemctl stop ${SERVICE_NAME}"
+print_status "  Start service: systemctl start ${SERVICE_NAME}"
+print_status "  Restart service: systemctl restart ${SERVICE_NAME}"
+print_status "  Lihat log service: journalctl -u ${SERVICE_NAME} -f"
+print_status "  Lihat log aplikasi: tail -f ${INSTANCE_DIR}/gunicorn_stderr.log" # Log aplikasi yang lebih detail
+print_status "  Lihat log recovery: journalctl -u ${SERVICE_NAME} -f | grep RECOVERY"
+print_status "  Lihat log domain: journalctl -u ${SERVICE_NAME} -f | grep DOMAIN"
+echo ""
+print_status "Direktori instalasi: ${INSTANCE_DIR}"
+echo ""
+
+# Cek apakah port instans terbuka
+print_status "Mengecek koneksi ke port ${INSTANCE_PORT}..."
+if curl -s --connect-timeout 5 "http://localhost:${INSTANCE_PORT}" > /dev/null; then
+    print_success "Server dapat diakses di http://${SERVER_IP}:${INSTANCE_PORT}"
+else
+    print_warning "Server mungkin masih starting up. Tunggu beberapa detik dan coba akses."
+fi
+
+echo ""
+print_success "Instalasi StreamHib V2 untuk ${INSTANCE_USERNAME} selesai! Selamat menggunakan!"
+echo -e "${YELLOW}Jangan lupa untuk membuat akun pertama di halaman register untuk instans ini.${NC}"
+echo -e "${BLUE}Untuk setup domain, login ke panel admin instans ini dan masuk menu 'Pengaturan Domain'.${NC}"
+echo ""
+print_warning "PENTING: SSH tetap dapat diakses di port 22. Jangan lupa ganti password default jika ada."
