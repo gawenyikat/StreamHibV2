@@ -95,11 +95,9 @@ check_command "Install pustaka Python global"
 # 2. Otomatisasi Penyiapan Kuota Disk (Jika belum aktif di fstab)
 print_status "Mengecek dan mengaktifkan kuota disk di /etc/fstab (jika belum)..."
 
-# Gunakan awk untuk modifikasi fstab yang lebih aman
 awk -v userq=",usrquota,grpquota" '
 $2 == "/" && $3 == "ext4" {
     if ($4 !~ /usrquota/ && $4 !~ /grpquota/) {
-        # Append options to the 4th field (mount options)
         $4 = $4 userq;
     }
 }
@@ -110,18 +108,24 @@ check_command "Modifikasi /etc/fstab untuk kuota"
 print_warning "Perubahan /etc/fstab telah dilakukan. Kuota mungkin tidak sepenuhnya aktif sampai server di-REBOOT."
 print_warning "Anda bisa me-reboot sekarang atau melanjutkan instalasi. Jika melanjutkan, kuota akan aktif setelah reboot berikutnya."
 
-# Hapus file kuota lama jika ada (untuk format non-native ext4)
 rm -f /aquota.user /aquota.group || true
 
-# Coba remount untuk mengaktifkan kuota tanpa reboot, tapi tidak selalu sempurna
-mount -o remount / || true # Izinkan remount gagal jika busy
-check_command "Percobaan remount partisi root"
+print_status "Mencoba remount / ..."
+mount -o remount / || true
+check_command "Remount partisi root"
 
-# Buat file kuota internal ext4 dan aktifkan
-quotacheck -cvugm -F ext4 / || true # Izinkan kegagalan jika busy
-quotaon -ug / || true # Izinkan kegagalan jika tidak sepenuhnya siap
-print_status "Percobaan awal quotacheck dan quotaon selesai. Reboot mungkin masih diperlukan."
+if [ ! -f /aquota.user ] || [ ! -f /aquota.group ]; then
+    print_status "File kuota belum ada. Membuat file kuota dengan format vfsv1..."
+    quotacheck -cvugm -F vfsv1 /
+    check_command "Buat file kuota dengan quotacheck -F vfsv1"
+else
+    print_status "File kuota sudah ada. Melewati pembuatan file kuota."
+fi
 
+quotaon -ug / || print_warning "Quotaon gagal; kemungkinan butuh reboot agar quota aktif penuh"
+check_command "Aktifkan quota dengan quotaon"
+
+print_status "Kuota disk diaktifkan. Anda bisa cek dengan: repquota -a"
 
 # ====================================================================
 # BAGIAN PER INSTANS: Instalasi Aplikasi dan Konfigurasi Unik
