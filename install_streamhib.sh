@@ -118,7 +118,7 @@ mount -o remount / || true # Izinkan remount gagal jika busy
 check_command "Percobaan remount partisi root"
 
 # Buat file kuota internal ext4 dan aktifkan
-quotacheck -cvugm -F vfsv1 / || true # Izinkan kegagalan jika busy
+quotacheck -cvugm -F ext4 / || true # Izinkan kegagalan jika busy
 quotaon -ug / || true # Izinkan kegagalan jika tidak sepenuhnya siap
 print_status "Percobaan awal quotacheck dan quotaon selesai. Reboot mungkin masih diperlukan."
 
@@ -323,5 +323,3 @@ echo ""
 print_success "Instalasi StreamHib V2 untuk ${INSTANCE_USERNAME} selesai! Selamat menggunakan!"
 echo -e "${YELLOW}Jangan lupa untuk membuat akun pertama di halaman register untuk instans ini.${NC}"
 echo -e "${BLUE}Untuk setup domain, login ke panel admin instans ini dan masuk menu 'Pengaturan Domain'.${NC}"
-echo ""
-print_warning "PENTING: SSH tetap dapat diakses di port 22. Jangan lupa ganti password default jika ada."
