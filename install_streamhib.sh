@@ -252,12 +252,6 @@ check_command "Atur kuota disk untuk user '${USER_SYS}' menggunakan setquota"
 quotaon -ug "$DEVICE" || true
 print_status "Memastikan kuota aktif di ${DEVICE}"
 
-# HAPUS BARIS-BARIS INI KARENA INI ADALAH BAGIAN EDQUOTA LAMA YANG BERMASALAH
-# # Terapkan kuota yang dimodifikasi dari temporary file
-# edquota -u "$USER_SYS" < "$TEMP_QUOTA_FILE"
-# check_command "Atur kuota disk untuk user '${USER_SYS}'"
-# rm "$TEMP_QUOTA_FILE" # Bersihkan temporary file
-
 # 16. Cek status service
 sleep 3
 if systemctl is-active --quiet "${SERVICE_NAME}"; then
