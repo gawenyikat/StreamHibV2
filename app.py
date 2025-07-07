@@ -55,7 +55,24 @@ logging.basicConfig(
     filename=LOG_FILE_PATH, # Arahkan log ke file spesifik instans
     filemode='a' # Mode 'a' untuk append (menambahkan ke file yang sudah ada)
 )
+# ---- Mulai Penambahan Kode Baru di Sini untuk Kuota ----
+# Ekstrak nama pengguna instance dari nama direktori, misalnya "user1" dari "/root/StreamHibV2-user1"
+# Ini mengasumsikan format direktori StreamHibV2-<username_instans>
+def get_instance_username_from_dir(instance_dir):
+    match = re.search(r'StreamHibV2-(.+)', instance_dir)
+    if match:
+        return match.group(1)
+    # Fallback jika nama tidak standar. Pastikan install_streamhib.sh selalu membuat format standar.
+    return "default_instance" 
 
+# Dapatkan nama pengguna instance (misal 'utama', 'user1', dll.)
+INSTANCE_NAME_IDENTIFIER = get_instance_username_from_dir(DIRECTORY_BASE)
+
+# Nama pengguna sistem Linux yang terkait dengan instance ini untuk kuota
+# Berdasarkan install_streamhib.sh, formatnya adalah streamhib_<username_instans>
+SYSTEM_USER_FOR_QUOTA = f"streamhib_{INSTANCE_NAME_IDENTIFIER}"
+logging.info(f"Instance identified by directory as '{INSTANCE_NAME_IDENTIFIER}'. System user for quota: '{SYSTEM_USER_FOR_QUOTA}'")
+# ---- Akhir Penambahan Kode Baru ----
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "http://localhost:5000", "supports_credentials": True}})
 app.secret_key = "emuhib"
@@ -1796,15 +1813,174 @@ def delete_video_api():
         
 @app.route('/api/disk-usage', methods=['GET'])
 @login_required
-def disk_usage_api(): 
+def disk_usage_api():
     try:
-        t,u,f = shutil.disk_usage(VIDEO_DIR); tg,ug,fg=t/(2**30),u/(2**30),f/(2**30)
-        pu = (u/t)*100 if t>0 else 0
-        stat = 'full' if pu>95 else 'almost_full' if pu>80 else 'normal'
-        return jsonify({'status':stat,'total':round(tg,2),'used':round(ug,2),'free':round(fg,2),'percent_used':round(pu,2)})
+        # Kita akan mendapatkan informasi kuota menggunakan repquota untuk user spesifik
+        # DEVICE harus sesuai dengan fstab Anda, biasanya / atau device root
+        # Kita perlu menjalankan ini sebagai root karena quota memerlukan izin root
+        
+        # Dapatkan device tempat VIDEO_DIR berada
+        # Ini lebih robust daripada hanya '/dev/sda1'
+        try:
+            # Gunakan realpath untuk menangani symlink jika VIDEO_DIR adalah symlink
+            video_dir_realpath = os.path.realpath(VIDEO_DIR)
+            result = subprocess.run(['df', '-P', video_dir_realpath], capture_output=True, text=True, check=True)
+            device_line = result.stdout.strip().split('\n')[1] # Ambil baris kedua (setelah header)
+            device_path = device_line.split()[0] # Kolom pertama adalah nama device
+            
+            # Khusus untuk root partition, beberapa sistem bisa menampilkan '/' sebagai device
+            # Kita perlu memastikan nama device yang benar untuk repquota
+            if device_path == '/':
+                # Coba dapatkan device root dari mount
+                mount_output = subprocess.run(['mount'], capture_output=True, text=True, check=True).stdout
+                for line in mount_output.splitlines():
+                    if ' on / ' in line:
+                        device_path = line.split(' ')[0]
+                        break
+            
+            logging.info(f"Detected device for VIDEO_DIR ({VIDEO_DIR}): {device_path}")
+
+        except Exception as e:
+            logging.error(f"Failed to detect disk device for quota: {e}", exc_info=True)
+            # Fallback ke system-wide disk usage jika deteksi device gagal
+            t, u, f = shutil.disk_usage(VIDEO_DIR)
+            tg, ug, fg = t / (2 ** 30), u / (2 ** 30), f / (2 ** 30)
+            pu = (u / t) * 100 if t > 0 else 0
+            stat = 'full' if pu > 95 else 'almost_full' if pu > 80 else 'normal'
+            return jsonify({
+                'status': stat,
+                'total': round(tg, 2),
+                'used': round(ug, 2),
+                'free': round(fg, 2),
+                'percent_used': round(pu, 2),
+                'message': 'Quota check failed (device detection failed), showing system-wide usage.'
+            })
+
+        # Jalankan repquota untuk pengguna spesifik
+        # Perhatikan: Perintah ini perlu dijalankan sebagai root atau memiliki setuid bit
+        # Karena aplikasi Anda berjalan sebagai root, ini seharusnya tidak masalah.
+        quota_cmd = ["repquota", "-u", SYSTEM_USER_FOR_QUOTA, device_path]
+        logging.info(f"Executing quota command: {' '.join(quota_cmd)}")
+        
+        # Perhatikan: jika repquota tidak menemukan pengguna atau tidak ada kuota yang disetel,
+        # ia akan mengembalikan kode error 1. Kita perlu menangani ini.
+        result = subprocess.run(quota_cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            logging.warning(f"Quota check for user '{SYSTEM_USER_FOR_QUOTA}' failed (Code: {result.returncode}). Stderr: {result.stderr.strip()}", exc_info=True)
+            
+            # Jika user tidak ditemukan, atau kuota belum disetel dengan benar,
+            # kita bisa fallback ke membaca penggunaan disk secara umum (system-wide)
+            # atau mengembalikan nilai default (misal 30GB sebagai total)
+            
+            # --- Opsi Fallback 1: Gunakan shutils.disk_usage jika quota gagal ---
+            logging.info("Falling back to shutil.disk_usage for disk usage info.")
+            t, u, f = shutil.disk_usage(VIDEO_DIR)
+            tg, ug, fg = t / (2 ** 30), u / (2 ** 30), f / (2 ** 30)
+            pu = (u / t) * 100 if t > 0 else 0
+            stat = 'full' if pu > 95 else 'almost_full' if pu > 80 else 'normal'
+            
+            return jsonify({
+                'status': stat,
+                'total': round(tg, 2),
+                'used': round(ug, 2),
+                'free': round(fg, 2),
+                'percent_used': round(pu, 2),
+                'message': f"Failed to get user quota for '{SYSTEM_USER_FOR_QUOTA}'. Showing system-wide usage instead. Ensure quota is enabled and user has quota set on {device_path}."
+            })
+            
+            # --- Opsi Fallback 2 (Alternatif): Tampilkan kuota default hardcoded ---
+            # Jika Anda yakin kuota selalu 30GB, Anda bisa hardcode totalnya di sini
+            # max_quota_gb = 30
+            # current_used_gb = ... (Anda tetap perlu menghitung ini dari disk_usage() atau dari repquota output yang parsial)
+            # Namun, ini kurang akurat jika kuota berubah atau tidak aktif.
+            # Jadi, Opsi 1 di atas lebih disarankan.
+
+        # Menguraikan output repquota
+        # Contoh output repquota -u <user> /dev/vda1
+        # Block limits                                       File limits
+        #           used    soft    hard  grace     used  soft  hard  grace
+        # root    576212  31457280 36700160          17833     0     0       
+        lines = result.stdout.splitlines()
+        # Cari baris yang mengandung nama user
+        user_line = [line for line in lines if SYSTEM_USER_FOR_QUOTA in line]
+
+        if not user_line:
+            logging.warning(f"User '{SYSTEM_USER_FOR_QUOTA}' not found in repquota output. Fallback to system-wide disk usage.")
+            t, u, f = shutil.disk_usage(VIDEO_DIR)
+            tg, ug, fg = t / (2 ** 30), u / (2 ** 30), f / (2 ** 30)
+            pu = (u / t) * 100 if t > 0 else 0
+            stat = 'full' if pu > 95 else 'almost_full' if pu > 80 else 'normal'
+            return jsonify({
+                'status': stat,
+                'total': round(tg, 2),
+                'used': round(ug, 2),
+                'free': round(fg, 2),
+                'percent_used': round(pu, 2),
+                'message': f"User '{SYSTEM_USER_FOR_QUOTA}' not found in quota report. Showing system-wide usage."
+            })
+
+        user_line = user_line[0]
+        # Regex untuk mengekstrak angka. Pola bisa berbeda tergantung versi quota.
+        # Kita mencari: digunakan, soft_limit, hard_limit
+        # Cari urutan angka di baris yang relevan.
+        # Format umum: user_name  used_blocks  soft_limit  hard_limit
+        # Kita tahu soft limit adalah 30GB, hard limit 35GB (di setquota)
+        # Ambil 3 angka pertama setelah nama user: used, soft, hard
+        
+        # Cari semua angka berturut-turut setelah nama user
+        numbers = [int(n) for n in re.findall(r'\s+(\d+)\s+', user_line.replace(SYSTEM_USER_FOR_QUOTA, '', 1))] # Ganti nama user sekali saja
+
+        if len(numbers) < 3: # Membutuhkan setidaknya used, soft, hard
+            logging.error(f"Not enough numbers parsed from quota output for '{SYSTEM_USER_FOR_QUOTA}'. Line: '{user_line}' Numbers: {numbers}. Fallback to system-wide usage.")
+            t, u, f = shutil.disk_usage(VIDEO_DIR)
+            tg, ug, fg = t / (2 ** 30), u / (2 ** 30), f / (2 ** 30)
+            pu = (u / t) * 100 if t > 0 else 0
+            stat = 'full' if pu > 95 else 'almost_full' if pu > 80 else 'normal'
+            return jsonify({
+                'status': stat,
+                'total': round(tg, 2),
+                'used': round(ug, 2),
+                'free': round(fg, 2),
+                'percent_used': round(pu, 2),
+                'message': "Failed to parse quota output, showing system-wide usage."
+            })
+            
+        used_kb = numbers[0]
+        soft_limit_kb = numbers[1]
+        hard_limit_kb = numbers[2]
+
+        total_gb = round(soft_limit_kb / (1024 * 1024), 2)  # Konversi dari KB ke GB
+        used_gb = round(used_kb / (1024 * 1024), 2)
+        
+        # Kuota "free" dihitung dari soft limit dikurangi yang sudah terpakai
+        free_gb = round(total_gb - used_gb, 2)
+        if free_gb < 0: # Pastikan tidak negatif jika over-quota
+            free_gb = 0
+
+        percent_used = (used_kb / soft_limit_kb) * 100 if soft_limit_kb > 0 else 0
+        
+        if percent_used >= 95: # >95% dari soft limit
+            status = 'full'
+        elif percent_used >= 80: # >80% dari soft limit
+            status = 'almost_full'
+        else:
+            status = 'normal'
+            
+        return jsonify({
+            'status': status,
+            'total': total_gb,
+            'used': used_gb,
+            'free': free_gb,
+            'percent_used': round(percent_used, 2)
+        })
+
+    except subprocess.CalledProcessError as e:
+        logging.error(f"disk_usage_api: Subprocess error (quota command): {e.stderr}", exc_info=True)
+        return jsonify({'status': 'error', 'message': f'Kesalahan Server saat mendapatkan kuota: {e.stderr.strip()}'}), 500
     except Exception as e: 
-        logging.error(f"Error disk usage: {str(e)}",exc_info=True)
-        return jsonify({'status':'error','message':f'Kesalahan Server: {str(e)}'}),500
+        logging.error(f"disk_usage_api: Error tidak terduga: {str(e)}", exc_info=True)
+        return jsonify({'status': 'error', 'message': f'Kesalahan Server Internal: {str(e)}'}), 500
 
 @app.route('/api/sessions', methods=['GET'])
 @login_required
