@@ -248,14 +248,15 @@ DEVICE=$(df / | tail -1 | awk '{print $1}') # Dapatkan nama device (misal /dev/s
 setquota -u "$USER_SYS" "$SOFT_LIMIT_KB" "$HARD_LIMIT_KB" 0 0 "$DEVICE"
 check_command "Atur kuota disk untuk user '${USER_SYS}' menggunakan setquota"
 
-# Pastikan kuota diaktifkan untuk filesystem
+# Pastikan kuota diaktifkan untuk filesystem (opsional, tapi baik untuk memastikan)
 quotaon -ug "$DEVICE" || true
 print_status "Memastikan kuota aktif di ${DEVICE}"
 
-# Terapkan kuota yang dimodifikasi dari temporary file
-edquota -u "$USER_SYS" < "$TEMP_QUOTA_FILE"
-check_command "Atur kuota disk untuk user '${USER_SYS}'"
-rm "$TEMP_QUOTA_FILE" # Bersihkan temporary file
+# HAPUS BARIS-BARIS INI KARENA INI ADALAH BAGIAN EDQUOTA LAMA YANG BERMASALAH
+# # Terapkan kuota yang dimodifikasi dari temporary file
+# edquota -u "$USER_SYS" < "$TEMP_QUOTA_FILE"
+# check_command "Atur kuota disk untuk user '${USER_SYS}'"
+# rm "$TEMP_QUOTA_FILE" # Bersihkan temporary file
 
 # 16. Cek status service
 sleep 3
