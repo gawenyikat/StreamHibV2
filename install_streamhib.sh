@@ -243,15 +243,14 @@ SOFT_LIMIT_KB=31457280  # 30GB in KB (30 * 1024 * 1024)
 HARD_LIMIT_KB=36700160  # 35GB in KB (35 * 1024 * 1024)
 DEVICE=$(df / | tail -1 | awk '{print $1}') # Dapatkan nama device (misal /dev/sda1)
 
-# Menggunakan metode non-interaktif yang lebih aman untuk edquota
-TEMP_QUOTA_FILE=$(mktemp)
-# Ambil info kuota saat ini dan redirect ke temp file
-edquota -u "$USER_SYS" > "$TEMP_QUOTA_FILE" 2>/dev/null # Supress pesan startup edquota
+# Menggunakan setquota secara langsung, yang lebih cocok untuk otomatisasi non-interaktif
+# Format: setquota -u <username> <soft_blocks> <hard_blocks> <soft_inodes> <hard_inodes> <filesystem>
+setquota -u "$USER_SYS" "$SOFT_LIMIT_KB" "$HARD_LIMIT_KB" 0 0 "$DEVICE"
+check_command "Atur kuota disk untuk user '${USER_SYS}' menggunakan setquota"
 
-# Modifikasi baris kuota di temporary file
-# Ini akan mengubah soft/hard limit blok untuk DEVICE spesifik yang ditemukan,
-# sambil mempertahankan nilai inode soft/hard limit yang ada.
-sed -i.bak -E "s|($DEVICE)\s+[0-9]+\s+[0-9]+\s+([0-9]+)\s+([0-9]+)|\\1 $SOFT_LIMIT_KB $HARD_LIMIT_KB \\2 \\3|" "$TEMP_QUOTA_FILE"
+# Pastikan kuota diaktifkan untuk filesystem
+quotaon -ug "$DEVICE" || true
+print_status "Memastikan kuota aktif di ${DEVICE}"
 
 # Terapkan kuota yang dimodifikasi dari temporary file
 edquota -u "$USER_SYS" < "$TEMP_QUOTA_FILE"
