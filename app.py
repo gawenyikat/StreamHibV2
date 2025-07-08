@@ -1574,6 +1574,8 @@ def extract_drive_id(val):
             if len(p)>20 and '.' not in p and '=' not in p: return p 
     return val if re.match(r'^[a-zA-Z0-9_-]{20,}$',val) else None 
 
+# ... (sisa kode app.py Anda) ...
+
 @app.route('/api/download', methods=['POST'])
 @login_required
 def download_video_api():
@@ -1602,28 +1604,59 @@ def download_video_api():
                     new_filename_with_ext = f"{downloaded_filename_to_check}.mp4" 
                     try:
                         os.rename(os.path.join(VIDEO_DIR, downloaded_filename_to_check), os.path.join(VIDEO_DIR, new_filename_with_ext))
+                        downloaded_filename_to_check = new_filename_with_ext # Update to new name
                         logging.info(f"File download {downloaded_filename_to_check} di-rename menjadi {new_filename_with_ext}")
                     except Exception as e_rename_gdown:
                         logging.error(f"Gagal me-rename file download {downloaded_filename_to_check} setelah gdown: {e_rename_gdown}")
+                
+                # --- MULAI: KODE TAMBAHAN UNTUK PERUBAHAN KEPEMILIKAN ---
+                if downloaded_filename_to_check:
+                    try:
+                        import pwd # Tambahkan baris ini di awal file app.py jika belum ada
+                        import grp # Tambahkan baris ini di awal file app.py jika belum ada
+                        
+                        file_path_to_chown = os.path.join(VIDEO_DIR, downloaded_filename_to_check)
+                        # Dapatkan UID dan GID untuk pengguna sistem
+                        
+                        uid = pwd.getpwnam(SYSTEM_USER_FOR_QUOTA).pw_uid
+                        gid = grp.getgrnam(SYSTEM_USER_FOR_QUOTA).gr_gid
+                        
+                        os.chown(file_path_to_chown, uid, gid)
+                        # Secara opsional, atur izin yang lebih ketat jika diperlukan
+                        os.chmod(file_path_to_chown, 0o644) # Baca/tulis untuk pemilik, hanya-baca untuk lainnya
+                        logging.info(f"Mengubah kepemilikan '{downloaded_filename_to_check}' ke pengguna '{SYSTEM_USER_FOR_QUOTA}' ({uid}:{gid}).")
+                    except Exception as e_chown:
+                        logging.error(f"Gagal mengubah kepemilikan '{downloaded_filename_to_check}' ke '{SYSTEM_USER_FOR_QUOTA}': {e_chown}")
+                        # Anda mungkin ingin menangani ini dengan lebih baik, misalnya menghapus file, atau memberi tahu pengguna
+                        return jsonify({'status':'error','message':f'Pengunduhan berhasil, tetapi gagal mengatur izin file (kuota mungkin tidak berfungsi). Error: {str(e_chown)}'}),500
+                # --- AKHIR: KODE TAMBAHAN UNTUK PERUBAHAN KEPEMILIKAN ---
+
             elif "already exists" in res.stderr.lower() or "already exists" in res.stdout.lower():
                  logging.info(f"File untuk ID {vid_id} kemungkinan sudah ada. Tidak ada file baru terdeteksi.")
             else:
                 logging.warning(f"gdown berhasil (code 0) tapi tidak ada file baru terdeteksi di {VIDEO_DIR}. Output: {res.stdout} Err: {res.stderr}")
 
             with socketio_lock: socketio.emit('videos_update',get_videos_list_data())
-            return jsonify({'status':'success','message':'Download video berhasil. Cek daftar video.'})
+            # Setelah mengubah kepemilikan, picu pembaruan penggunaan disk
+            disk_usage_data = disk_usage_api().get_json() # Dapatkan penggunaan disk terbaru secara langsung
+            if disk_usage_data.get('status') == 'success': # Periksa apakah disk_usage_api berhasil
+                socketio.emit('disk_usage_update', {'disk_usage': disk_usage_data})
+            else:
+                logging.warning(f"Gagal mendapatkan pembaruan penggunaan disk setelah pengunduhan untuk emit socket: {disk_usage_data.get('message')}")
+
+            return jsonify({'status':'success','message':'Pengunduhan video berhasil. Periksa daftar video.'})
         else:
             logging.error(f"Gdown error (code {res.returncode}): {res.stderr} | stdout: {res.stdout}")
-            err_msg = f'Download Gagal: {res.stderr[:250]}' 
-            if "Permission denied" in res.stderr or "Zugriff verweigert" in res.stderr: err_msg="Download Gagal: Pastikan file publik atau Anda punya izin."
-            elif "File not found" in res.stderr or "No such file" in res.stderr or "Cannot retrieve BFC cookies" in res.stderr: err_msg="Download Gagal: File tidak ditemukan atau tidak dapat diakses."
-            elif "ERROR:" in res.stderr: err_msg = f"Download Gagal: {res.stderr.split('ERROR:')[1].strip()[:200]}"
+            err_msg = f'Pengunduhan Gagal: {res.stderr[:250]}' 
+            if "Permission denied" in res.stderr or "Zugriff verweigert" in res.stderr: err_msg="Pengunduhan Gagal: Pastikan file publik atau Anda punya izin."
+            elif "File not found" in res.stderr or "No such file" in res.stderr or "Cannot retrieve BFC cookies" in res.stderr: err_msg="Pengunduhan Gagal: File tidak ditemukan atau tidak dapat diakses."
+            elif "ERROR:" in res.stderr: err_msg = f"Pengunduhan Gagal: {res.stderr.split('ERROR:')[1].strip()[:200]}"
             return jsonify({'status':'error','message':err_msg}),500
     except subprocess.TimeoutExpired: 
-        logging.error("Proses download video timeout.")
-        return jsonify({'status':'error','message':'Download timeout (30 menit).'}),500
+        logging.error("Proses pengunduhan video timeout.")
+        return jsonify({'status':'error','message':'Pengunduhan timeout (30 menit).'}),500
     except Exception as e: 
-        logging.exception("Error tidak terduga saat download video")
+        logging.exception("Error tidak terduga saat pengunduhan video")
         return jsonify({'status':'error','message':f'Kesalahan Server: {str(e)}'}),500
         
 @app.route('/api/videos/delete-all', methods=['POST'])
