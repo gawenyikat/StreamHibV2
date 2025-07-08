@@ -243,8 +243,8 @@ check_command "Start service ${SERVICE_NAME}"
 
 # 15. Atur kuota default 30GB/35GB untuk user instans
 print_status "Mengatur kuota disk untuk user sistem '${USER_SYS}'..."
-SOFT_LIMIT_KB=31457280  # 30GB in KB (30 * 1024 * 1024)
-HARD_LIMIT_KB=36700160  # 35GB in KB (35 * 1024 * 1024)
+SOFT_LIMIT_KB=26214400  # 25GB in KB (25 * 1024 * 1024)
+HARD_LIMIT_KB=31457280  # 30GB in KB (30 * 1024 * 1024)
 DEVICE=$(df / | tail -1 | awk '{print $1}') # Dapatkan nama device (misal /dev/sda1)
 
 # Menggunakan setquota secara langsung, yang lebih cocok untuk otomatisasi non-interaktif
