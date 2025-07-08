@@ -75,14 +75,14 @@ Ini adalah bagian di mana Anda membuat instans StreamHibV2 terpisah untuk setiap
     **Contoh untuk Pengguna 1:**
 
     ```bash
-    sudo bash install_user_instance.sh user1 5001
+    sudo bash install_streamhib.sh user1 5001
     
     ```
 
     **Contoh untuk Pengguna 2:**
 
     ```bash
-    sudo bash install_user_instance.sh user2 5002
+    sudo bash install_streamhib.sh user2 5002
     
     ```
 
