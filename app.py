@@ -1,9 +1,13 @@
+import dataclasses
+from typing import Union, Dict
+
+# Modified app.py to ensure instance-specific systemd service management
 from flask import Flask, request, render_template, jsonify, redirect, url_for, session
 from flask_socketio import SocketIO
 import shlex
 import subprocess
 import os
-import logging # Pastikan ini sudah diimpor
+import logging
 from functools import wraps
 import re
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -67,6 +71,7 @@ def get_instance_username_from_dir(instance_dir):
 
 # Dapatkan nama pengguna instance (misal 'utama', 'user1', dll.)
 INSTANCE_NAME_IDENTIFIER = get_instance_username_from_dir(DIRECTORY_BASE)
+logging.info(f"Instance identified by directory as '{INSTANCE_NAME_IDENTIFIER}'. System user for quota: 'streamhib_{INSTANCE_NAME_IDENTIFIER}'")
 
 # Nama pengguna sistem Linux yang terkait dengan instance ini untuk kuota
 # Berdasarkan install_streamhib.sh, formatnya adalah streamhib_<username_instans>
@@ -438,7 +443,8 @@ def create_missing_services(session_data_list):
             session_data['sanitized_service_id'] = sanitized_service_id
             logging.info(f"RECOVERY: Membuat sanitized_service_id '{sanitized_service_id}' untuk sesi '{session_name_original}'")
         
-        service_name = f"stream-{sanitized_service_id}.service"
+        # MODIFIED: Include INSTANCE_NAME_IDENTIFIER in service name
+        service_name = f"stream-{INSTANCE_NAME_IDENTIFIER}-{sanitized_service_id}.service"
         service_path = os.path.join(SERVICE_DIR, service_name)
         
         # Cek apakah service sudah ada
@@ -500,13 +506,20 @@ def recover_orphaned_sessions():
             logging.info("RECOVERY: Tidak ada sesi aktif untuk dipulihkan")
             return
         
-        # Dapatkan daftar service yang sedang berjalan
+        # MODIFIED: Filter running services to only those belonging to *this* instance
         try:
             output = subprocess.check_output(["systemctl", "list-units", "--type=service", "--state=running"], text=True)
-            running_services = {line.split()[0] for line in output.strip().split('\n') if "stream-" in line}
+            running_services_for_this_instance = set()
+            for line in output.strip().split('\n'):
+                if f"stream-{INSTANCE_NAME_IDENTIFIER}-" in line:
+                    full_service_name = line.split()[0]
+                    # Extract the sanitized_session_id_part to compare with JSON
+                    # Example: 'stream-user1-my-session.service' -> 'my-session'
+                    sanitized_part = full_service_name[len(f"stream-{INSTANCE_NAME_IDENTIFIER}-"):-len(".service")]
+                    running_services_for_this_instance.add(sanitized_part)
         except Exception as e:
             logging.error(f"RECOVERY: Gagal mendapatkan daftar service yang berjalan: {e}")
-            running_services = set()
+            running_services_for_this_instance = set()
         
         orphaned_sessions = []
         
@@ -515,21 +528,19 @@ def recover_orphaned_sessions():
             sanitized_id = session.get('sanitized_service_id')
             
             if not sanitized_id:
-                # Buat sanitized_service_id jika tidak ada
                 sanitized_id = sanitize_for_service_name(session_name)
                 session['sanitized_service_id'] = sanitized_id
                 logging.info(f"RECOVERY: Menambahkan sanitized_service_id '{sanitized_id}' untuk sesi '{session_name}'")
             
-            expected_service = f"stream-{sanitized_id}.service"
-            
-            if expected_service not in running_services:
-                logging.warning(f"RECOVERY: Sesi yatim ditemukan - '{session_name}' (service: {expected_service})")
+            # Check if the session in JSON is actually running in systemd (for this instance)
+            if sanitized_id not in running_services_for_this_instance:
+                logging.warning(f"RECOVERY: Sesi yatim ditemukan - '{session_name}' (sanitized ID: {sanitized_id}). Tidak ada service systemd yang berjalan untuk ini.")
                 orphaned_sessions.append(session)
         
         if orphaned_sessions:
             logging.info(f"RECOVERY: Ditemukan {len(orphaned_sessions)} sesi yatim, memulai pemulihan...")
             
-            # Buat ulang service yang hilang
+            # Buat ulang service yang hilang (create_missing_services already modified)
             created_services = create_missing_services(orphaned_sessions)
             
             if created_services:
@@ -541,7 +552,7 @@ def recover_orphaned_sessions():
                     socketio.emit('sessions_update', get_active_sessions_data())
                     socketio.emit('recovery_notification', {
                         'message': f'Berhasil memulihkan {len(created_services)} sesi yang terputus',
-                        'recovered_sessions': [s.get('id') for s in orphaned_sessions if f"stream-{s.get('sanitized_service_id')}.service" in created_services]
+                        'recovered_sessions': [s.get('id') for s in orphaned_sessions if f"stream-{INSTANCE_NAME_IDENTIFIER}-{s.get('sanitized_service_id')}.service" in created_services]
                     })
                 
                 logging.info(f"RECOVERY: Pemulihan selesai - {len(created_services)} sesi berhasil dipulihkan")
@@ -580,7 +591,7 @@ def recover_scheduled_sessions():
                     logging.warning(f"RECOVERY: Skip jadwal karena data tidak lengkap: {sched_def}")
                     continue
                 
-                # Cek apakah job scheduler sudah ada
+                # Cek apakah job scheduler sudah ada (job IDs are internal to this Flask app instance)
                 existing_jobs = [job.id for job in scheduler.get_jobs()]
                 
                 if recurrence == 'daily':
@@ -699,7 +710,8 @@ def trial_reset():
             if not sanitized_id_service: # Fallback jika tidak ada, seharusnya jarang terjadi
                 sanitized_id_service = sanitize_for_service_name(item.get('id', f'unknown_id_{datetime.now().timestamp()}'))
             
-            service_name_to_stop = f"stream-{sanitized_id_service}.service"
+            # MODIFIED: Include INSTANCE_NAME_IDENTIFIER in service name
+            service_name_to_stop = f"stream-{INSTANCE_NAME_IDENTIFIER}-{sanitized_id_service}.service"
             try:
                 subprocess.run(["systemctl", "stop", service_name_to_stop], check=False, timeout=15)
                 service_path_to_stop = os.path.join(SERVICE_DIR, service_name_to_stop)
@@ -759,16 +771,11 @@ def trial_reset():
         
         write_sessions(s_data) # Simpan perubahan pada sessions.json
         
-        # Kirim pembaruan ke semua klien melalui SocketIO
         with socketio_lock:
             socketio.emit('sessions_update', get_active_sessions_data())
             socketio.emit('inactive_sessions_update', {"inactive_sessions": get_inactive_sessions_data()})
             socketio.emit('schedules_update', get_schedules_list_data())
             socketio.emit('videos_update', get_videos_list_data()) # Daftar video akan kosong
-            socketio.emit('trial_reset_notification', { # Kirim notifikasi reset
-                'message': 'Aplikasi telah direset karena mode trial. Semua sesi dan video telah dihapus.'
-            })
-            # Kirim status trial terbaru (opsional, jika ingin indikator trial selalu update)
             socketio.emit('trial_status_update', {
                 'is_trial': TRIAL_MODE_ENABLED,
                 'message': 'Mode Trial Aktif - Reset setiap {} jam.'.format(TRIAL_RESET_HOURS) if TRIAL_MODE_ENABLED else ''
@@ -801,13 +808,10 @@ def sanitize_for_service_name(session_name_original):
     return sanitized[:50] # Batasi panjang untuk keamanan nama file
 
 def create_service_file(session_name_original, video_path, platform_url, stream_key):
-    # Gunakan session_name_original untuk deskripsi, tapi nama service disanitasi
-    sanitized_service_part = sanitize_for_service_name(session_name_original)
-    service_name = f"stream-{sanitized_service_part}.service"
-    # Pastikan service_name unik jika sanitasi menghasilkan nama yang sama untuk session_name_original yang berbeda
-    # Ini bisa diatasi dengan menambahkan hash pendek atau timestamp jika diperlukan, tapi untuk sekarang kita jaga sederhana.
-    # Jika ada potensi konflik nama service yang tinggi, pertimbangkan untuk menggunakan UUID atau hash dari session_name_original.
-
+    sanitized_session_id_part = sanitize_for_service_name(session_name_original) # This part goes into JSON
+    # MODIFIED: Include INSTANCE_NAME_IDENTIFIER in service name
+    service_name = f"stream-{INSTANCE_NAME_IDENTIFIER}-{sanitized_session_id_part}.service"
+    
     service_path = os.path.join(SERVICE_DIR, service_name)
     service_content = f"""[Unit]
 Description=Streaming service for {session_name_original}
@@ -826,7 +830,7 @@ WantedBy=multi-user.target
         with open(service_path, 'w') as f: f.write(service_content)
         subprocess.run(["systemctl", "daemon-reload"], check=True)
         logging.info(f"Service file created: {service_name} (from original: '{session_name_original}')")
-        return service_name, sanitized_service_part # Kembalikan juga bagian yang disanitasi untuk ID
+        return service_name, sanitized_session_id_part # Kembalikan juga bagian yang disanitasi untuk ID
     except Exception as e:
         logging.error(f"Error creating service file {service_name} (from original: '{session_name_original}'): {e}")
         raise
@@ -887,14 +891,19 @@ def get_active_sessions_data():
         output = subprocess.check_output(["systemctl", "list-units", "--type=service", "--state=running"], text=True)
         all_sessions_data = read_sessions() 
         active_sessions_list = []
-        active_services_systemd = {line.split()[0] for line in output.strip().split('\n') if "stream-" in line}
+        
+        # MODIFIED: Filter systemd services to only those belonging to this instance
+        active_services_systemd_full_names = {line.split()[0] for line in output.strip().split('\n') if f"stream-{INSTANCE_NAME_IDENTIFIER}-" in line}
+        
         json_active_sessions = all_sessions_data.get('active_sessions', [])
         needs_json_update = False
 
-        for service_name_systemd in active_services_systemd:
-            sanitized_id_from_systemd_service = service_name_systemd.replace("stream-", "").replace(".service", "")
-            
-            session_json = next((s for s in json_active_sessions if s.get('sanitized_service_id') == sanitized_id_from_systemd_service), None)
+        for full_service_name_from_systemd in active_services_systemd_full_names:
+            # Extract the sanitized session ID part from the systemd service name
+            prefix = f"stream-{INSTANCE_NAME_IDENTIFIER}-"
+            sanitized_id_from_systemd_service_name = full_service_name_from_systemd[len(prefix):-len(".service")]
+
+            session_json = next((s for s in json_active_sessions if s.get('sanitized_service_id') == sanitized_id_from_systemd_service_name), None)
 
             if session_json: # Ketika sesi ditemukan di sessions.json
                 actual_schedule_type = session_json.get('scheduleType', 'manual')
@@ -912,24 +921,24 @@ def get_active_sessions_data():
                     'startTime': session_json.get('start_time', 'unknown'),
                     'platform': session_json.get('platform', 'unknown'),
                     'video_name': session_json.get('video_name', 'unknown'),
-                    'stream_key': session_json.get('stream_key', 'unknown'), # <<< TAMBAHKAN BARIS INI
+                    'stream_key': session_json.get('stream_key', 'unknown'),
                     'stopTime': formatted_display_stop_time, 
                     'scheduleType': actual_schedule_type,
                     'sanitized_service_id': session_json.get('sanitized_service_id')
                 })
             
             else: # Ketika service aktif di systemd tapi tidak ada di all_sessions_data['active_sessions']
-                logging.warning(f"Service {service_name_systemd} (ID sanitasi: {sanitized_id_from_systemd_service}) aktif tapi tidak di JSON active_sessions. Mencoba memulihkan...")
+                logging.warning(f"Service {full_service_name_from_systemd} (sanitized ID: {sanitized_id_from_systemd_service_name}) aktif tapi tidak di JSON active_sessions. Mencoba memulihkan...")
                 
                 scheduled_definition = next((
                     sched for sched in all_sessions_data.get('scheduled_sessions', []) 
-                    if sched.get('sanitized_service_id') == sanitized_id_from_systemd_service
+                    if sched.get('sanitized_service_id') == sanitized_id_from_systemd_service_name
                 ), None)
 
-                session_id_original = f"recovered-{sanitized_id_from_systemd_service}" # Fallback
-                video_name_to_use = "unknown (recovered)"
-                stream_key_to_use = "unknown"
-                platform_to_use = "unknown"
+                session_id_original = (scheduled_definition.get('session_name_original') if scheduled_definition else f"recovered-{sanitized_id_from_systemd_service_name}")
+                video_name_to_use = (scheduled_definition.get('video_file') if scheduled_definition else "unknown (recovered)")
+                stream_key_to_use = (scheduled_definition.get('stream_key') if scheduled_definition else "unknown")
+                platform_to_use = (scheduled_definition.get('platform') if scheduled_definition else "unknown")
                 schedule_type_to_use = "manual_recovered" 
                 recovered_stop_time_iso = None
                 recovered_duration_minutes = 0
@@ -939,12 +948,6 @@ def get_active_sessions_data():
                 formatted_display_stop_time_frontend = None
 
                 if scheduled_definition:
-                    logging.info(f"Definisi jadwal ditemukan untuk service {service_name_systemd}: {scheduled_definition.get('session_name_original')}")
-                    session_id_original = scheduled_definition.get('session_name_original', session_id_original)
-                    video_name_to_use = scheduled_definition.get('video_file', video_name_to_use)
-                    stream_key_to_use = scheduled_definition.get('stream_key', stream_key_to_use)
-                    platform_to_use = scheduled_definition.get('platform', platform_to_use)
-                    
                     recurrence = scheduled_definition.get('recurrence_type')
                     if recurrence == 'daily':
                         schedule_type_to_use = "daily_recurring_instance_recovered"
@@ -991,7 +994,7 @@ def get_active_sessions_data():
 
                 recovered_session_entry_for_json = {
                     "id": session_id_original,
-                    "sanitized_service_id": sanitized_id_from_systemd_service, 
+                    "sanitized_service_id": sanitized_id_from_systemd_service_name, # THIS IS CORRECT, it's the part *after* instance ID
                     "video_name": video_name_to_use, "stream_key": stream_key_to_use, "platform": platform_to_use,
                     "status": "active", "start_time": current_recovery_time_iso,
                     "scheduleType": schedule_type_to_use,
@@ -1114,11 +1117,22 @@ def get_schedules_list_data():
 
 def check_systemd_sessions():
     try:
-        active_sysd_services = {ln.split()[0] for ln in subprocess.check_output(["systemctl","list-units","--type=service","--state=running"],text=True).strip().split('\n') if "stream-" in ln}
+        # MODIFIED: Get running services for THIS INSTANCE
+        full_active_sysd_service_names = {ln.split()[0] for ln in subprocess.check_output(["systemctl","list-units","--type=service","--state=running"],text=True).strip().split('\n') if f"stream-{INSTANCE_NAME_IDENTIFIER}-" in ln}
+        
+        # Create a set of sanitized IDs (JSON-compatible) for lookup
+        active_sysd_sanitized_ids = set()
+        for full_name in full_active_sysd_service_names:
+            # Extract the sanitized session ID part from the full service name
+            prefix = f"stream-{INSTANCE_NAME_IDENTIFIER}-"
+            sanitized_part = full_name[len(prefix):-len(".service")]
+            active_sysd_sanitized_ids.add(sanitized_part)
+
         s_data = read_sessions()
         now_jakarta_dt = datetime.now(jakarta_tz)
         json_changed = False
 
+        # Part 1: Check scheduled sessions for overdue one-time streams
         for sched_item in list(s_data.get('scheduled_sessions', [])): 
             if sched_item.get('recurrence_type', 'one_time') == 'daily': 
                 continue
@@ -1129,66 +1143,37 @@ def check_systemd_sessions():
                 dur_mins = sched_item.get('duration_minutes', 0)
                 if dur_mins <= 0: continue 
                 stop_dt = start_dt + timedelta(minutes=dur_mins)
-                # Gunakan sanitized_service_id dari definisi jadwal
+                
                 sanitized_service_id_from_schedule = sched_item.get('sanitized_service_id')
                 if not sanitized_service_id_from_schedule:
                     logging.warning(f"CHECK_SYSTEMD: sanitized_service_id tidak ada di jadwal one-time {sched_item.get('session_name_original')}. Skip.")
                     continue
-                serv_name = f"stream-{sanitized_service_id_from_schedule}.service"
+                
+                # Full expected systemd service name for this scheduled item
+                expected_full_service_name = f"stream-{INSTANCE_NAME_IDENTIFIER}-{sanitized_service_id_from_schedule}.service"
 
-                if now_jakarta_dt > stop_dt and serv_name in active_sysd_services:
+                if now_jakarta_dt > stop_dt and expected_full_service_name in full_active_sysd_service_names:
                     logging.info(f"CHECK_SYSTEMD: Menghentikan sesi terjadwal (one-time) yang terlewat waktu: {sched_item['session_name_original']}")
                     stop_scheduled_streaming(sched_item['session_name_original']) 
                     json_changed = True 
             except Exception as e_sched_check:
                  logging.error(f"CHECK_SYSTEMD: Error memeriksa jadwal one-time {sched_item.get('session_name_original')}: {e_sched_check}")
         
-        logging.debug("CHECK_SYSTEMD: Memeriksa sesi aktif yang mungkin terlewat waktu berhentinya...")
-        for active_session_check in list(s_data.get('active_sessions', [])): # Iterasi salinan list
-            stop_time_iso = active_session_check.get('stopTime') # 'stopTime' dari active_sessions
-            session_id_to_check = active_session_check.get('id')
-            sanitized_id_service_check = active_session_check.get('sanitized_service_id')
-
-            if not session_id_to_check or not sanitized_id_service_check:
-               logging.warning(f"CHECK_SYSTEMD (Fallback): Melewati sesi aktif {session_id_to_check or 'UNKNOWN'} karena ID atau sanitized_service_id kurang.")
-               continue
-
-            service_name_check = f"stream-{sanitized_id_service_check}.service"
-
-         # Hanya proses jika stopTime ada, dan service-nya memang masih terdaftar sebagai aktif di systemd
-            if stop_time_iso and service_name_check in active_sysd_services:
-             try:
-                 # Pastikan stop_time_dt dalam timezone yang sama dengan now_jakarta_dt untuk perbandingan
-                 stop_time_dt = datetime.fromisoformat(stop_time_iso)
-                 if stop_time_dt.tzinfo is None: # Jika naive, lokalkan ke Jakarta
-                     stop_time_dt = jakarta_tz.localize(stop_time_dt)
-                 else: # Jika sudah ada timezone, konversikan ke Jakarta
-                     stop_time_dt = stop_time_dt.astimezone(jakarta_tz)
-
-                 if now_jakarta_dt > stop_time_dt:
-                     logging.info(f"CHECK_SYSTEMD (Fallback): Sesi aktif '{session_id_to_check}' (service: {service_name_check}) telah melewati waktu berhenti yang tercatat ({stop_time_iso}). Menghentikan sekarang...")
-                     # Panggil fungsi stop_scheduled_streaming yang sudah ada.
-                     # Fungsi ini sudah menangani pemindahan ke inactive_sessions, penghapusan service, dan update JSON.
-                     stop_scheduled_streaming(session_id_to_check)
-                     # Karena stop_scheduled_streaming sudah melakukan write_sessions dan emit socket,
-                     # kita mungkin tidak perlu set json_changed = True di sini secara eksplisit
-                     # HANYA untuk aksi stop ini, tapi perhatikan jika ada logika lain di check_systemd_sessions.
-                     # Namun, untuk konsistensi bahwa ada perubahan, bisa saja ditambahkan.
-                     json_changed = True # Menandakan ada perubahan pada sessions.json
-             except ValueError:
-                 logging.warning(f"CHECK_SYSTEMD (Fallback): Format stopTime ('{stop_time_iso}') tidak valid untuk sesi aktif '{session_id_to_check}'. Tidak dapat memeriksa fallback stop.")
-             except Exception as e_fallback_stop:
-                 logging.error(f"CHECK_SYSTEMD (Fallback): Error saat mencoba menghentikan sesi aktif '{session_id_to_check}' yang overdue via fallback: {e_fallback_stop}", exc_info=True)
+        logging.debug("CHECK_SYSTEMD: Memeriksa sesi aktif yang mungkin terlewat waktu berhentinya atau tidak aktif di systemd...")
+        
+        sessions_to_remove_from_active = []
+        sessions_to_add_to_inactive = []
 
         for active_json_session in list(s_data.get('active_sessions',[])): 
-            # Gunakan sanitized_service_id dari sesi aktif
-            san_id_active_service = active_json_session.get('sanitized_service_id')
-            if not san_id_active_service : 
+            san_id_active_json = active_json_session.get('sanitized_service_id')
+            if not san_id_active_json : 
                 logging.warning(f"CHECK_SYSTEMD: Sesi aktif {active_json_session.get('id')} tidak memiliki sanitized_service_id. Skip.")
                 continue 
-            serv_name_active = f"stream-{san_id_active_service}.service"
+            
+            # Full expected systemd service name for this active session
+            expected_service_name = f"stream-{INSTANCE_NAME_IDENTIFIER}-{san_id_active_json}.service"
 
-            if serv_name_active not in active_sysd_services:
+            if expected_service_name not in full_active_sysd_service_names:
                 is_recently_stopped_by_scheduler = any(
                     s['id'] == active_json_session.get('id') and 
                     s.get('status') == 'inactive' and
@@ -1199,15 +1184,40 @@ def check_systemd_sessions():
                     logging.info(f"CHECK_SYSTEMD: Sesi {active_json_session.get('id')} sepertinya baru dihentikan oleh scheduler. Skip pemindahan otomatis.")
                     continue
 
-                logging.info(f"CHECK_SYSTEMD: Sesi {active_json_session.get('id','N/A')} (service: {serv_name_active}) tidak aktif di systemd. Memindahkan ke inactive.")
+                logging.info(f"CHECK_SYSTEMD: Sesi {active_json_session.get('id','N/A')} (service: {expected_service_name}) tidak aktif di systemd. Memindahkan ke inactive.")
                 active_json_session['status']='inactive'
                 active_json_session['stop_time']=now_jakarta_dt.isoformat()
-                s_data.setdefault('inactive_sessions',[]).append(active_json_session)
-                s_data['active_sessions']=[s for s in s_data['active_sessions'] if s.get('id')!=active_json_session.get('id')]
+                sessions_to_add_to_inactive.append(active_json_session)
+                sessions_to_remove_from_active.append(active_json_session.get('id'))
                 json_changed = True
-        
-        if json_changed: 
-            write_sessions(s_data) 
+            else: # If service is running, check if it's overdue (only if it has a stopTime)
+                stop_time_iso = active_json_session.get('stopTime')
+                if stop_time_iso:
+                    try:
+                        stop_time_dt = datetime.fromisoformat(stop_time_iso)
+                        if stop_time_dt.tzinfo is None:
+                            stop_time_dt = jakarta_tz.localize(stop_time_dt)
+                        else:
+                            stop_time_dt = stop_time_dt.astimezone(jakarta_tz)
+
+                        if now_jakarta_dt > stop_time_dt:
+                            logging.info(f"CHECK_SYSTEMD: Sesi aktif '{active_json_session.get('id')}' (service: {expected_service_name}) telah melewati waktu berhenti yang tercatat ({stop_time_iso}). Menghentikan sekarang...")
+                            stop_scheduled_streaming(active_json_session.get('id'))
+                            json_changed = True
+                    except ValueError:
+                        logging.warning(f"CHECK_SYSTEMD: Format stopTime ('{stop_time_iso}') tidak valid untuk sesi aktif '{active_json_session.get('id')}'.")
+                    except Exception as e_stop_check:
+                        logging.error(f"CHECK_SYSTEMD: Error saat mencoba menghentikan sesi aktif '{active_json_session.get('id')}' yang overdue: {e_stop_check}", exc_info=True)
+
+
+        # Apply changes after iterating to avoid modifying list during iteration
+        if sessions_to_remove_from_active:
+            s_data['active_sessions'] = [s for s in s_data['active_sessions'] if s['id'] not in sessions_to_remove_from_active]
+            for sess_to_add in sessions_to_add_to_inactive:
+                s_data.setdefault('inactive_sessions', []).append(sess_to_add)
+
+        if json_changed:
+            write_sessions(s_data)
             with socketio_lock:
                 socketio.emit('sessions_update', get_active_sessions_data())
                 socketio.emit('inactive_sessions_update', {"inactive_sessions": get_inactive_sessions_data()})
@@ -1227,10 +1237,10 @@ def start_scheduled_streaming(platform, stream_key, video_file, session_name_ori
     platform_url = "rtmp://a.rtmp.youtube.com/live2" if platform == "YouTube" else "rtmps://live-api-s.facebook.com:443/rtmp"
     
     try:
-        # create_service_file menggunakan session_name_original, dan mengembalikan sanitized_service_part
+        # create_service_file uses session_name_original, and returns sanitized_service_id_part
         service_name_systemd, sanitized_service_id_part = create_service_file(session_name_original, video_path, platform_url, stream_key)
         subprocess.run(["systemctl", "start", service_name_systemd], check=True, capture_output=True, text=True)
-        logging.info(f"Service {service_name_systemd} untuk jadwal '{session_name_original}' dimulai.")
+        logging.info(f"Service {service_name_systemd} for scheduled '{session_name_original}' started.")
         
         current_start_time_iso = datetime.now(jakarta_tz).isoformat()
         s_data = read_sessions()
@@ -1301,7 +1311,8 @@ def stop_scheduled_streaming(session_name_original_or_active_id):
         logging.error(f"Tidak dapat menghentikan service untuk sesi '{session_name_original_or_active_id}' karena sanitized_service_id tidak ditemukan.")
         return
         
-    service_name_to_stop = f"stream-{sanitized_id_service_to_stop}.service"
+    # MODIFIED: Include INSTANCE_NAME_IDENTIFIER in service name
+    service_name_to_stop = f"stream-{INSTANCE_NAME_IDENTIFIER}-{sanitized_id_service_to_stop}.service"
     
     try:
         subprocess.run(["systemctl", "stop", service_name_to_stop], check=False, timeout=15)
@@ -1499,7 +1510,7 @@ def handle_connect():
             socketio.emit('trial_status_update', {
                 'is_trial': True,
                 # Sesuaikan pesan ini jika perlu, atau buat kunci terjemahan baru di frontend
-                'message': f"Mode Trial Aktif, Live, Schedule Live dan Video akan terhapus tiap 2 jam karena server Reset tiap {TRIAL_RESET_HOURS} jam" 
+                'message': f"Mode Trial Aktif - Live, Schedule Live dan Video akan terhapus tiap 2 jam karena server Reset tiap {TRIAL_RESET_HOURS} jam" 
             })
         else:
             socketio.emit('trial_status_update', {'is_trial': False, 'message': ''})
@@ -1624,7 +1635,7 @@ def download_video_api():
                         os.chmod(file_path_to_chown, 0o644) # Baca/tulis untuk pemilik, hanya-baca untuk lainnya
                         logging.info(f"Mengubah kepemilikan '{downloaded_filename_to_check}' ke pengguna '{SYSTEM_USER_FOR_QUOTA}' ({uid}:{gid}).")
                     except Exception as e_chown:
-                        logging.error(f"Gagal mengubah kepemilikan '{downloaded_filename_to_check}' ke '{SYSTEM_USER_FOR_QUOTA}': {e_chown}")
+                        logging.error(f"Gagal mengubah kepemilikan '{downloaded_filename_to_chown}' ke '{SYSTEM_USER_FOR_QUOTA}': {e_chown}")
                         # Anda mungkin ingin menangani ini dengan lebih baik, misalnya menghapus file, atau memberi tahu pengguna
                         return jsonify({'status':'error','message':f'Pengunduhan berhasil, tetapi gagal mengatur izin file (kuota mungkin tidak berfungsi). Error: {str(e_chown)}'}),500
                 # --- AKHIR: KODE TAMBAHAN UNTUK PERUBAHAN KEPEMILIKAN ---
@@ -1697,7 +1708,7 @@ def start_streaming_api():
         
         platform_url = "rtmp://a.rtmp.youtube.com/live2" if platform == "YouTube" else "rtmps://live-api-s.facebook.com:443/rtmp"
         
-        # create_service_file menggunakan session_name_original, mengembalikan sanitized_service_id_part
+        # create_service_file uses session_name_original, returns sanitized_service_id_part
         service_name_systemd, sanitized_service_id_part = create_service_file(session_name_original, video_path, platform_url, stream_key)
         subprocess.run(["systemctl", "start", service_name_systemd], check=True)
         
@@ -1753,7 +1764,8 @@ def stop_streaming_api():
             sanitized_service_id_for_stop = sanitize_for_service_name(session_id_to_stop)
             logging.warning(f"Menggunakan fallback sanitized_service_id '{sanitized_service_id_for_stop}' untuk menghentikan sesi '{session_id_to_stop}'.")
 
-        service_name_systemd = f"stream-{sanitized_service_id_for_stop}.service"
+        # MODIFIED: Include INSTANCE_NAME_IDENTIFIER in service name
+        service_name_systemd = f"stream-{INSTANCE_NAME_IDENTIFIER}-{sanitized_service_id_for_stop}.service"
         
         try:
             subprocess.run(["systemctl","stop",service_name_systemd],check=False, timeout=15)
@@ -2245,18 +2257,19 @@ def reactivate_session_api():
         
         platform_url = "rtmp://a.rtmp.youtube.com/live2" if platform == "YouTube" else "rtmps://live-api-s.facebook.com:443/rtmp"
         
-        # Gunakan nama sesi asli untuk service, create_service_file akan sanitasi untuk nama service
+        # Use original session name for service, create_service_file will sanitize for service name
+        # MODIFIED: create_service_file now includes INSTANCE_NAME_IDENTIFIER in service name
         service_name_systemd, new_sanitized_service_id_part = create_service_file(session_id_to_reactivate, video_path, platform_url, stream_key) 
         subprocess.run(["systemctl", "start", service_name_systemd], check=True) 
         
         session_obj_to_reactivate['status'] = 'active'
         session_obj_to_reactivate['start_time'] = datetime.now(jakarta_tz).isoformat()
         session_obj_to_reactivate['platform'] = platform 
-        session_obj_to_reactivate['sanitized_service_id'] = new_sanitized_service_id_part # Update jika berbeda
+        session_obj_to_reactivate['sanitized_service_id'] = new_sanitized_service_id_part # Update if different
         if 'stop_time' in session_obj_to_reactivate: del session_obj_to_reactivate['stop_time'] 
         session_obj_to_reactivate['scheduleType'] = 'manual_reactivated'
         session_obj_to_reactivate['stopTime'] = None 
-        session_obj_to_reactivate['duration_minutes'] = 0 # Reaktivasi manual dianggap durasi tak terbatas
+        session_obj_to_reactivate['duration_minutes'] = 0 # Manual reactivation assumes indefinite duration
 
         s_data['inactive_sessions'] = [s for s in s_data['inactive_sessions'] if s['id'] != session_id_to_reactivate] 
         s_data['active_sessions'] = add_or_update_session_in_list(
@@ -2335,7 +2348,7 @@ def edit_inactive_session_api():
         logging.exception(f"Error edit sesi tidak aktif '{session_id_err_edit_sess}'")
         return jsonify({'status':'error','message':f'Kesalahan Server Internal: {str(e)}'}),500
         
-# Tambahkan ini di dalam app.py, di bagian API endpoint Anda
+# Add this inside app.py, in your API endpoint section
 
 @app.route('/api/inactive-sessions/delete-all', methods=['POST'])
 @login_required
@@ -2413,7 +2426,8 @@ def recovery_status_api():
         # Cek service systemd yang berjalan
         try:
             output =subprocess.check_output(["systemctl", "list-units", "--type=service", "--state=running"], text=True)
-            running_services = len([line for line in output.strip().split('\n') if "stream-" in line])
+            # MODIFIED: Filter running services to only those belonging to *this* instance
+            running_services = len([line for line in output.strip().split('\n') if f"stream-{INSTANCE_NAME_IDENTIFIER}-" in line])
         except:
             running_services = 0
         
@@ -2886,7 +2900,8 @@ def stop_session_admin_api(session_id):
         if not sanitized_service_id_for_stop:
             sanitized_service_id_for_stop = sanitize_for_service_name(session_id)
         
-        service_name_systemd = f"stream-{sanitized_service_id_for_stop}.service"
+        # MODIFIED: Include INSTANCE_NAME_IDENTIFIER in service name
+        service_name_systemd = f"stream-{INSTANCE_NAME_IDENTIFIER}-{sanitized_service_id_for_stop}.service"
         
         try:
             subprocess.run(["systemctl","stop",service_name_systemd],check=False, timeout=15)
